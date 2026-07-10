@@ -16,7 +16,7 @@ import { PlexClient } from "./plex.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const app = express();
-const port = Number(process.env.PORT || 7878);
+const port = Number(process.env.PORT || 7889);
 const scanJobs = new Map();
 
 app.disable("x-powered-by");

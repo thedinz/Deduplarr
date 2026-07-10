@@ -18,9 +18,9 @@ services:
     image: ghcr.io/thedinz/deduplarr:dev
     container_name: deduplarr
     ports:
-      - "7878:7878"
+      - "7889:7889"
     environment:
-      PORT: "7878"
+      PORT: "7889"
       CONFIG_DIR: /config
     volumes:
       - ./config:/config
@@ -31,7 +31,7 @@ services:
 docker compose up -d
 ```
 
-Open `http://localhost:7878`, sign in with `admin/admin`, then add your Plex URL and token in Settings.
+Open `http://localhost:7889`, sign in with `admin/admin`, then add your Plex URL and token in Settings.
 
 ## Authentication
 
@@ -50,7 +50,7 @@ Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PORT` | `7878` | HTTP port inside the container |
+| `PORT` | `7889` | HTTP port inside the container |
 | `CONFIG_DIR` | `/config` in Docker | Stores local app config |
 | `SESSION_SECRET` | generated | Optional stable session signing secret |
 
@@ -61,7 +61,7 @@ pnpm install
 pnpm dev
 ```
 
-The local app listens on `http://localhost:7878`.
+The local app listens on `http://localhost:7889`.
 
 ## Release Images
 
