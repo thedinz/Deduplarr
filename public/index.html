@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Deduplarr</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">D</span>
+          <span>Deduplarr</span>
+        </div>
+        <nav class="nav-list" aria-label="Primary">
+          <button class="nav-item active" data-view="duplicates">
+            <i data-lucide="copy"></i>
+            <span>Duplicates</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <i data-lucide="settings"></i>
+            <span>Settings</span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1>Duplicates</h1>
+            <p id="serverSummary">Not connected</p>
+          </div>
+          <div class="topbar-actions">
+            <span id="connectionBadge" class="status-badge muted">Offline</span>
+            <button id="refreshButton" class="icon-button" title="Refresh">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+        </header>
+
+        <section id="duplicatesView" class="view active-view">
+          <div class="toolbar">
+            <div class="library-strip" id="libraryStrip"></div>
+            <div class="toolbar-actions">
+              <label class="search-field">
+                <i data-lucide="search"></i>
+                <input id="searchInput" type="search" placeholder="Filter">
+              </label>
+              <button id="scanButton" class="primary-button">
+                <i data-lucide="radar"></i>
+                <span>Scan</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <span>Groups</span>
+              <strong id="groupCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Files</span>
+              <strong id="fileCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Possible Reclaim</span>
+              <strong id="reclaimCount">0 B</strong>
+            </div>
+            <div class="stat">
+              <span>Libraries</span>
+              <strong id="libraryCount">0</strong>
+            </div>
+          </div>
+
+          <div id="messageArea" class="message-area"></div>
+          <div id="duplicatesList" class="duplicates-list"></div>
+        </section>
+
+        <section id="settingsView" class="view">
+          <form id="settingsForm" class="settings-panel">
+            <div class="field-grid">
+              <label>
+                <span>Plex URL</span>
+                <input id="plexUrlInput" name="plexUrl" placeholder="http://192.168.1.10:32400" autocomplete="url">
+              </label>
+              <label>
+                <span>Token</span>
+                <input id="plexTokenInput" name="plexToken" type="password" autocomplete="off">
+              </label>
+              <label>
+                <span>Page Size</span>
+                <input id="scanPageSizeInput" name="scanPageSize" type="number" min="25" max="1000" step="25">
+              </label>
+            </div>
+            <label class="toggle-row">
+              <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
+              <span>Enable delete buttons</span>
+            </label>
+            <div class="form-actions">
+              <button class="primary-button" type="submit">
+                <i data-lucide="save"></i>
+                <span>Save</span>
+              </button>
+              <button id="testButton" class="secondary-button" type="button">
+                <i data-lucide="plug-zap"></i>
+                <span>Test</span>
+              </button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="deleteDialog" class="delete-dialog">
+      <form method="dialog">
+        <header>
+          <h2>Delete File</h2>
+          <button class="icon-button ghost" value="cancel" title="Close">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <p id="deleteFileName" class="delete-file-name"></p>
+        <code id="deleteFilePath"></code>
+        <label>
+          <span>Confirm</span>
+          <input id="deleteConfirmInput" autocomplete="off" placeholder="DELETE">
+        </label>
+        <menu>
+          <button class="secondary-button" value="cancel">Cancel</button>
+          <button id="confirmDeleteButton" class="danger-button" value="default">
+            <i data-lucide="trash-2"></i>
+            <span>Delete</span>
+          </button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/vendor/lucide/lucide.min.js"></script>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

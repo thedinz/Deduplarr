@@ -1,0 +1,23 @@
+{
+  "name": "deduplarr",
+  "version": "0.1.0",
+  "description": "A Docker-first Plex duplicate cleanup companion with an arr-style UI.",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "lint": "node --check src/server.js && node --check src/plex.js && node --check src/config.js && node --check src/scoring.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "fast-xml-parser": "^5.3.0",
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {}
+}

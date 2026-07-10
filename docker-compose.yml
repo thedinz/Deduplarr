@@ -1,0 +1,15 @@
+services:
+  deduplarr:
+    image: ghcr.io/thedinz/deduplarr:dev
+    container_name: deduplarr
+    ports:
+      - "7878:7878"
+    environment:
+      PORT: "7878"
+      CONFIG_DIR: /config
+      # PLEX_URL: http://192.168.1.10:32400
+      # PLEX_TOKEN: your-plex-token
+      # ENABLE_DESTRUCTIVE_ACTIONS: "false"
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
