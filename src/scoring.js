@@ -28,6 +28,23 @@ function lower(value) {
   return String(value || "").toLowerCase();
 }
 
+function normalizedToken(value) {
+  const token = lower(value).trim().replace(/^\./, "");
+  if (["h265", "x265"].includes(token)) return "hevc";
+  if (token === "x264") return "h264";
+  return token;
+}
+
+function normalizedList(value) {
+  return Array.isArray(value)
+    ? value.map(normalizedToken).filter(Boolean)
+    : [];
+}
+
+function matchesToken(preference, values) {
+  return values.some((value) => value === preference || value.includes(preference));
+}
+
 function number(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -90,7 +107,42 @@ function hasHdrSignal(record) {
   );
 }
 
-export function scoreMedia(record) {
+function preferenceMatches(record, preferences = {}) {
+  const containers = normalizedList(preferences.containers);
+  const videoCodecs = normalizedList(preferences.videoCodecs);
+  const audioCodecs = normalizedList(preferences.audioCodecs);
+  const bestAudio = record.audioStreams?.[0] || {};
+  const recordContainers = [
+    record.container,
+    record.extension,
+    String(record.file || "").split(".").pop()
+  ].map(normalizedToken);
+  const recordVideoCodecs = [
+    record.videoCodec,
+    record.video?.codec,
+    record.video?.displayTitle,
+    record.video?.extendedDisplayTitle
+  ].map(normalizedToken);
+  const recordAudioCodecs = [
+    record.audioCodec,
+    bestAudio.codec,
+    ...(record.audioStreams || []).map((stream) => stream.codec)
+  ].map(normalizedToken);
+
+  const matches = [];
+  const container = containers.find((item) => recordContainers.includes(item));
+  if (container) matches.push(`Preferred ${container.toUpperCase()}`);
+
+  const videoCodec = videoCodecs.find((item) => matchesToken(item, recordVideoCodecs));
+  if (videoCodec) matches.push(`Preferred ${videoCodec.toUpperCase()}`);
+
+  const audioCodec = audioCodecs.find((item) => matchesToken(item, recordAudioCodecs));
+  if (audioCodec) matches.push(`Preferred ${audioCodec.toUpperCase()}`);
+
+  return matches;
+}
+
+export function scoreMedia(record, preferences = {}) {
   const height = number(record.height || record.video?.height);
   const width = number(record.width || record.video?.width);
   const bitrate = number(record.bitrate || record.video?.bitrate);
@@ -142,8 +194,16 @@ export function scoreMedia(record) {
     reasons.push("missing");
   }
 
+  const preferenceReasons = preferenceMatches(record, preferences);
+  reasons.push(...preferenceReasons);
+  const qualityValue = clamp(Math.round(score));
+  const preferenceValue = preferenceReasons.length;
+
   return {
-    value: clamp(Math.round(score)),
+    value: qualityValue,
+    preferenceValue,
+    preferenceRank: preferenceValue * 1000 + qualityValue,
+    preferenceReasons,
     reasons
   };
 }

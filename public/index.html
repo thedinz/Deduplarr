@@ -4,13 +4,38 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Deduplarr</title>
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <div class="app-shell">
+    <div id="loginShell" class="login-shell">
+      <form id="loginForm" class="login-panel">
+        <div class="brand login-brand">
+          <img class="brand-logo" src="/logo.svg" alt="" aria-hidden="true">
+          <span>Deduplarr</span>
+        </div>
+        <h1>Sign In</h1>
+        <p id="loginHint">Default login is admin/admin.</p>
+        <label>
+          <span>Username</span>
+          <input id="loginUsernameInput" autocomplete="username" value="admin">
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="loginPasswordInput" type="password" autocomplete="current-password" value="admin">
+        </label>
+        <button class="primary-button" type="submit">
+          <i data-lucide="log-in"></i>
+          <span>Sign In</span>
+        </button>
+        <div id="loginMessage" class="message-area"></div>
+      </form>
+    </div>
+
+    <div id="appShell" class="app-shell is-hidden">
       <aside class="sidebar">
         <div class="brand">
-          <span class="brand-mark">D</span>
+          <img class="brand-logo" src="/logo.svg" alt="" aria-hidden="true">
           <span>Deduplarr</span>
         </div>
         <nav class="nav-list" aria-label="Primary">
@@ -28,13 +53,17 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <h1>Duplicates</h1>
-            <p id="serverSummary">Not connected</p>
+            <h1 id="pageTitle">Duplicates</h1>
+            <p id="serverSummary">Not connected to Plex</p>
           </div>
           <div class="topbar-actions">
+            <span id="userBadge" class="status-badge muted">admin</span>
             <span id="connectionBadge" class="status-badge muted">Offline</span>
             <button id="refreshButton" class="icon-button" title="Refresh">
               <i data-lucide="refresh-cw"></i>
+            </button>
+            <button id="logoutButton" class="icon-button" title="Sign out">
+              <i data-lucide="log-out"></i>
             </button>
           </div>
         </header>
@@ -43,6 +72,17 @@
           <div class="toolbar">
             <div class="library-strip" id="libraryStrip"></div>
             <div class="toolbar-actions">
+              <label class="mode-field">
+                <span>Mode</span>
+                <select id="reviewModeSelect">
+                  <option value="manual">Manual</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </label>
+              <button id="autoSelectButton" class="secondary-button" type="button">
+                <i data-lucide="check-check"></i>
+                <span>Auto Select</span>
+              </button>
               <label class="search-field">
                 <i data-lucide="search"></i>
                 <input id="searchInput" type="search" placeholder="Filter">
@@ -51,6 +91,16 @@
                 <i data-lucide="radar"></i>
                 <span>Scan</span>
               </button>
+            </div>
+          </div>
+
+          <div id="scanProgressPanel" class="scan-progress-panel is-hidden">
+            <div class="scan-progress-header">
+              <span id="scanProgressText">Queued</span>
+              <span id="scanProgressMeta">0% | 0:00</span>
+            </div>
+            <div class="scan-progress-track" aria-hidden="true">
+              <div id="scanProgressFill" class="scan-progress-fill"></div>
             </div>
           </div>
 
@@ -79,24 +129,116 @@
 
         <section id="settingsView" class="view">
           <form id="settingsForm" class="settings-panel">
-            <div class="field-grid">
-              <label>
-                <span>Plex URL</span>
-                <input id="plexUrlInput" name="plexUrl" placeholder="http://192.168.1.10:32400" autocomplete="url">
-              </label>
-              <label>
-                <span>Token</span>
-                <input id="plexTokenInput" name="plexToken" type="password" autocomplete="off">
-              </label>
-              <label>
-                <span>Page Size</span>
-                <input id="scanPageSizeInput" name="scanPageSize" type="number" min="25" max="1000" step="25">
+            <div class="settings-section first-section">
+              <div class="section-heading">
+                <h2>Plex</h2>
+                <span id="tokenStatus" class="section-status">No token saved</span>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>Plex URL</span>
+                  <input id="plexUrlInput" name="plexUrl" placeholder="http://192.168.1.10:32400" autocomplete="url">
+                </label>
+                <label>
+                  <span>Token</span>
+                  <input id="plexTokenInput" name="plexToken" type="password" autocomplete="off" placeholder="Paste token to add or replace">
+                </label>
+                <label>
+                  <span>Page Size</span>
+                  <input id="scanPageSizeInput" name="scanPageSize" type="number" min="25" max="1000" step="25">
+                </label>
+              </div>
+              <label class="toggle-row">
+                <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
+                <span>Enable delete buttons</span>
               </label>
             </div>
-            <label class="toggle-row">
-              <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
-              <span>Enable delete buttons</span>
-            </label>
+            <div class="settings-section">
+              <div class="section-heading">
+                <h2>Keep Preferences</h2>
+                <span id="selectionStatus" class="section-status">Manual</span>
+              </div>
+              <div class="field-grid preferences-grid">
+                <label>
+                  <span>Default Mode</span>
+                  <select id="selectionModeInput" name="selectionMode">
+                    <option value="manual">Manual</option>
+                    <option value="auto">Auto-select suggested</option>
+                  </select>
+                </label>
+                <div class="preference-field">
+                  <span>Containers / Extensions</span>
+                  <div class="multi-select" data-preference="containers">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredContainersInput" name="preferredContainers" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Video Codecs</span>
+                  <div class="multi-select" data-preference="videoCodecs">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredVideoCodecsInput" name="preferredVideoCodecs" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Audio Codecs</span>
+                  <div class="multi-select" data-preference="audioCodecs">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredAudioCodecsInput" name="preferredAudioCodecs" type="hidden">
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
+                <h2>Authentication</h2>
+                <span id="authStatus" class="section-status">Built-in</span>
+              </div>
+              <div class="field-grid auth-grid">
+                <label>
+                  <span>Mode</span>
+                  <select id="authModeInput" name="authMode">
+                    <option value="builtin">Built-in</option>
+                    <option value="external">External reverse proxy</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input id="authUsernameInput" name="authUsername" autocomplete="username">
+                </label>
+                <label>
+                  <span>External user headers</span>
+                  <input id="externalHeadersInput" name="externalUserHeaders" placeholder="x-forwarded-user, x-auth-request-user">
+                </label>
+              </div>
+              <div class="field-grid password-grid">
+                <label>
+                  <span>Current password</span>
+                  <input id="currentPasswordInput" name="currentPassword" type="password" autocomplete="current-password">
+                </label>
+                <label>
+                  <span>New password</span>
+                  <input id="authPasswordInput" name="authPassword" type="password" autocomplete="new-password">
+                </label>
+                <label>
+                  <span>Confirm new password</span>
+                  <input id="authPasswordConfirmInput" name="authPasswordConfirm" type="password" autocomplete="new-password">
+                </label>
+              </div>
+            </div>
+            <div id="settingsMessageArea" class="message-area"></div>
             <div class="form-actions">
               <button class="primary-button" type="submit">
                 <i data-lucide="save"></i>
