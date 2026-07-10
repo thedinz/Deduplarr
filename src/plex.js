@@ -80,7 +80,7 @@ function groupSubtitle(item) {
   if (item.year) parts.push(item.year);
   if (item.type) parts.push(item.type);
   if (item.originallyAvailableAt) parts.push(item.originallyAvailableAt);
-  return parts.join(" • ");
+  return parts.join(" | ");
 }
 
 function bestAudioStream(audioStreams) {

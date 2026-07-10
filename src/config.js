@@ -94,7 +94,7 @@ export async function saveConfig(input, options = {}) {
     scanPageSize: Number(input.scanPageSize || current.scanPageSize || 200),
     auth: nextAuth,
     sessionSecret:
-      current.sessionSecret || process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex")
+      current.sessionSecret || process.env.SESSION_SECRET || processSessionSecret
   };
 
   await mkdir(CONFIG_DIR, { recursive: true });

@@ -15,6 +15,7 @@ const elements = {
   loginUsernameInput: document.querySelector("#loginUsernameInput"),
   loginPasswordInput: document.querySelector("#loginPasswordInput"),
   loginMessage: document.querySelector("#loginMessage"),
+  pageTitle: document.querySelector("#pageTitle"),
   serverSummary: document.querySelector("#serverSummary"),
   userBadge: document.querySelector("#userBadge"),
   connectionBadge: document.querySelector("#connectionBadge"),
@@ -28,6 +29,7 @@ const elements = {
   reclaimCount: document.querySelector("#reclaimCount"),
   libraryCount: document.querySelector("#libraryCount"),
   messageArea: document.querySelector("#messageArea"),
+  settingsMessageArea: document.querySelector("#settingsMessageArea"),
   duplicatesList: document.querySelector("#duplicatesList"),
   settingsForm: document.querySelector("#settingsForm"),
   plexUrlInput: document.querySelector("#plexUrlInput"),
@@ -40,6 +42,8 @@ const elements = {
   currentPasswordInput: document.querySelector("#currentPasswordInput"),
   authPasswordInput: document.querySelector("#authPasswordInput"),
   authPasswordConfirmInput: document.querySelector("#authPasswordConfirmInput"),
+  tokenStatus: document.querySelector("#tokenStatus"),
+  authStatus: document.querySelector("#authStatus"),
   testButton: document.querySelector("#testButton"),
   deleteDialog: document.querySelector("#deleteDialog"),
   deleteFileName: document.querySelector("#deleteFileName"),
@@ -94,6 +98,12 @@ function setMessage(message, type = "") {
     : "";
 }
 
+function setSettingsMessage(message, type = "success") {
+  elements.settingsMessageArea.innerHTML = message
+    ? `<div class="message ${type}">${escapeHtml(message)}</div>`
+    : "";
+}
+
 function setLoginMessage(message, type = "") {
   elements.loginMessage.innerHTML = message
     ? `<div class="message ${type}">${escapeHtml(message)}</div>`
@@ -138,11 +148,17 @@ function renderConfig() {
   if (!state.config) return;
   elements.plexUrlInput.value = state.config.plexUrl || "";
   elements.plexTokenInput.value = "";
+  elements.plexTokenInput.placeholder = state.config.hasToken
+    ? "Saved token hidden - paste to replace"
+    : "Paste token to add or replace";
   elements.scanPageSizeInput.value = state.config.scanPageSize || 200;
   elements.allowDeletesInput.checked = Boolean(state.config.allowDeletes);
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
   elements.authUsernameInput.value = state.config.auth?.username || "admin";
   elements.externalHeadersInput.value = (state.config.auth?.externalUserHeaders || []).join(", ");
+  elements.tokenStatus.textContent = state.config.hasToken ? "Token saved" : "No token saved";
+  elements.authStatus.textContent =
+    state.config.auth?.mode === "external" ? "External" : "Built-in";
   elements.currentPasswordInput.value = "";
   elements.authPasswordInput.value = "";
   elements.authPasswordConfirmInput.value = "";
@@ -164,6 +180,31 @@ function setOffline(message = "Not connected") {
   elements.connectionBadge.textContent = "Offline";
   elements.connectionBadge.className = "status-badge muted";
   elements.serverSummary.textContent = message;
+}
+
+function plexFormPayload(includeAuth = false) {
+  const payload = {
+    plexUrl: elements.plexUrlInput.value,
+    allowDeletes: elements.allowDeletesInput.checked,
+    scanPageSize: Number(elements.scanPageSizeInput.value || 200)
+  };
+
+  if (elements.plexTokenInput.value) {
+    payload.plexToken = elements.plexTokenInput.value;
+  }
+
+  if (includeAuth) {
+    payload.authMode = elements.authModeInput.value;
+    payload.authUsername = elements.authUsernameInput.value;
+    payload.externalUserHeaders = elements.externalHeadersInput.value;
+    if (elements.authPasswordInput.value) {
+      payload.currentPassword = elements.currentPasswordInput.value;
+      payload.authPassword = elements.authPasswordInput.value;
+      payload.authPasswordConfirm = elements.authPasswordConfirmInput.value;
+    }
+  }
+
+  return payload;
 }
 
 function renderLibraries() {
@@ -379,38 +420,50 @@ async function scan() {
 
 async function saveSettings(event) {
   event.preventDefault();
+  setSettingsMessage("");
   if (elements.authPasswordInput.value !== elements.authPasswordConfirmInput.value) {
-    setMessage("New password confirmation does not match.", "error");
+    setSettingsMessage("New password confirmation does not match.", "error");
     return;
   }
 
-  const payload = {
-    plexUrl: elements.plexUrlInput.value,
-    allowDeletes: elements.allowDeletesInput.checked,
-    scanPageSize: Number(elements.scanPageSizeInput.value || 200),
-    authMode: elements.authModeInput.value,
-    authUsername: elements.authUsernameInput.value,
-    externalUserHeaders: elements.externalHeadersInput.value
-  };
-  if (elements.plexTokenInput.value) {
-    payload.plexToken = elements.plexTokenInput.value;
-  }
-  if (elements.authPasswordInput.value) {
-    payload.currentPassword = elements.currentPasswordInput.value;
-    payload.authPassword = elements.authPasswordInput.value;
-    payload.authPasswordConfirm = elements.authPasswordConfirmInput.value;
-  }
+  const payload = plexFormPayload(true);
 
   try {
+    setBusy(elements.settingsForm.querySelector("button[type='submit']"), true, "Saving");
     state.config = await api("/api/config", {
       method: "POST",
       body: JSON.stringify(payload)
     });
     renderConfig();
-    await refreshConnection();
-    setMessage("Settings saved.");
+    setSettingsMessage(
+      state.config.hasToken
+        ? "Settings saved. Plex token is stored and hidden."
+        : "Settings saved. Add a Plex token before scanning."
+    );
   } catch (error) {
-    setMessage(error.message, "error");
+    setSettingsMessage(error.message, "error");
+  } finally {
+    setBusy(elements.settingsForm.querySelector("button[type='submit']"), false, "Save");
+  }
+}
+
+async function testPlexConnection() {
+  setSettingsMessage("");
+  setBusy(elements.testButton, true, "Testing");
+  try {
+    const result = await api("/api/test-plex", {
+      method: "POST",
+      body: JSON.stringify(plexFormPayload(false))
+    });
+    setOnline(result.server);
+    setSettingsMessage(
+      `Connected to ${result.server.friendlyName}. Found ${result.libraries.length} supported libraries.`
+    );
+  } catch (error) {
+    setOffline(error.message);
+    setSettingsMessage(error.message, "error");
+  } finally {
+    setBusy(elements.testButton, false, "Test");
   }
 }
 
@@ -469,6 +522,8 @@ function setupNavigation() {
       document.querySelectorAll(".view").forEach((view) => view.classList.remove("active-view"));
       button.classList.add("active");
       document.querySelector(`#${button.dataset.view}View`).classList.add("active-view");
+      elements.pageTitle.textContent =
+        button.dataset.view === "settings" ? "Settings" : "Duplicates";
     });
   });
 }
@@ -480,7 +535,7 @@ function setupEvents() {
   elements.scanButton.addEventListener("click", scan);
   elements.searchInput.addEventListener("input", renderGroups);
   elements.settingsForm.addEventListener("submit", saveSettings);
-  elements.testButton.addEventListener("click", refreshConnection);
+  elements.testButton.addEventListener("click", testPlexConnection);
   elements.confirmDeleteButton.addEventListener("click", deleteActiveFile);
 }
 

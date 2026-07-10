@@ -34,6 +34,18 @@ async function clientFromConfig() {
   return new PlexClient(await getRuntimeConfig());
 }
 
+function plexClientFromInput(input, fallbackConfig) {
+  return new PlexClient({
+    ...fallbackConfig,
+    plexUrl: input.plexUrl?.trim() || fallbackConfig.plexUrl,
+    plexToken:
+      input.plexToken === undefined || input.plexToken === ""
+        ? fallbackConfig.plexToken
+        : input.plexToken.trim(),
+    scanPageSize: input.scanPageSize || fallbackConfig.scanPageSize
+  });
+}
+
 async function requireAuth(request, response, next) {
   const config = await getRuntimeConfig();
   const user = sessionFromRequest(request, config);
@@ -148,6 +160,26 @@ app.post(
 
     const saved = await saveConfig(body, options);
     response.json(publicConfig(saved));
+  })
+);
+
+app.post(
+  "/api/test-plex",
+  asyncRoute(async (request, response) => {
+    const config = request.runtimeConfig || (await getRuntimeConfig());
+    const client = plexClientFromInput(request.body || {}, config);
+    const [serverInfo, libraries] = await Promise.all([
+      client.serverInfo(),
+      client.libraries()
+    ]);
+
+    response.json({
+      ok: true,
+      server: serverInfo,
+      libraries: libraries.filter((library) =>
+        ["movie", "show", "video"].includes(library.type)
+      )
+    });
   })
 );
 

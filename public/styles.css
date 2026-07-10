@@ -1,13 +1,13 @@
 :root {
   color-scheme: dark;
-  --bg: #0d1117;
-  --panel: #151b23;
-  --panel-soft: #1b2430;
-  --line: #2c3644;
-  --text: #e7edf5;
-  --muted: #99a8ba;
-  --accent: #2f9bcc;
-  --accent-strong: #48b8e8;
+  --bg: #111315;
+  --panel: #1d2024;
+  --panel-soft: #262b31;
+  --line: #343a42;
+  --text: #e5e9ef;
+  --muted: #9aa5b1;
+  --accent: #35a6d9;
+  --accent-strong: #4ebbe9;
   --good: #55b37a;
   --warn: #d8a33f;
   --danger: #d95f59;
@@ -47,8 +47,9 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
+  background: var(--bg);
 }
 
 .login-shell {
@@ -115,8 +116,8 @@ button {
 
 .sidebar {
   border-right: 1px solid var(--line);
-  background: #10161f;
-  padding: 18px 14px;
+  background: #181b1f;
+  padding: 14px 10px;
 }
 
 .brand {
@@ -124,7 +125,7 @@ button {
   align-items: center;
   gap: 10px;
   height: 42px;
-  padding: 0 6px;
+  padding: 0 8px;
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -134,15 +135,15 @@ button {
   width: 30px;
   height: 30px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--accent);
   color: #06131b;
 }
 
 .nav-list {
   display: grid;
-  gap: 4px;
-  margin-top: 24px;
+  gap: 2px;
+  margin-top: 18px;
 }
 
 .nav-item {
@@ -150,10 +151,11 @@ button {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 38px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-left: 3px solid transparent;
+  border-radius: 2px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -162,6 +164,7 @@ button {
 .nav-item.active,
 .nav-item:hover {
   background: var(--panel-soft);
+  border-left-color: var(--accent);
   color: var(--text);
 }
 
@@ -174,10 +177,10 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 78px;
-  padding: 16px 24px;
+  min-height: 64px;
+  padding: 12px 22px;
   border-bottom: 1px solid var(--line);
-  background: rgba(21, 27, 35, 0.86);
+  background: #1b1f23;
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -186,7 +189,7 @@ button {
 
 .topbar h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1.2;
   letter-spacing: 0;
 }
@@ -207,7 +210,7 @@ button {
 
 .view {
   display: none;
-  padding: 22px 24px 34px;
+  padding: 18px 22px 34px;
 }
 
 .active-view {
@@ -237,7 +240,7 @@ button {
   min-height: 34px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
@@ -259,7 +262,7 @@ button {
   height: 38px;
   width: min(280px, 42vw);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--panel);
   padding: 0 10px;
   color: var(--muted);
@@ -282,10 +285,10 @@ button {
 }
 
 .stat {
-  min-height: 72px;
-  padding: 14px;
+  min-height: 66px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: var(--panel);
 }
 
@@ -310,9 +313,9 @@ button {
 
 .duplicate-group {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: var(--panel);
-  box-shadow: 0 10px 24px var(--shadow);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -321,8 +324,9 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 14px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
+  background: #23282e;
 }
 
 .group-title {
@@ -356,7 +360,7 @@ button {
   align-items: center;
   min-height: 24px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 3px;
   border: 1px solid var(--line);
   background: #111923;
   color: var(--muted);
@@ -378,7 +382,7 @@ button {
   grid-template-columns: 78px minmax(220px, 1.6fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) 106px 48px;
   gap: 12px;
   align-items: center;
-  padding: 13px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid rgba(44, 54, 68, 0.7);
 }
 
@@ -391,7 +395,7 @@ button {
   place-items: center;
   width: 56px;
   height: 38px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: rgba(47, 155, 204, 0.16);
   color: #d8f3ff;
   border: 1px solid rgba(72, 184, 232, 0.42);
@@ -427,7 +431,7 @@ button {
   color: #dff7e8;
   background: rgba(85, 179, 122, 0.16);
   border: 1px solid rgba(85, 179, 122, 0.5);
-  border-radius: 999px;
+  border-radius: 3px;
   padding: 2px 6px;
   font-size: 11px;
 }
@@ -469,10 +473,16 @@ button {
 
 .message {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   padding: 12px;
   background: var(--panel);
   color: var(--muted);
+}
+
+.message.success {
+  color: #dff7e8;
+  border-color: rgba(85, 179, 122, 0.45);
+  background: rgba(85, 179, 122, 0.1);
 }
 
 .message.error {
@@ -483,25 +493,47 @@ button {
 
 .settings-panel {
   display: grid;
-  gap: 18px;
-  max-width: 900px;
-  padding: 18px;
+  gap: 14px;
+  max-width: 1120px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: var(--panel);
 }
 
 .settings-section {
   display: grid;
   gap: 14px;
-  padding-top: 16px;
+  padding: 14px;
   border-top: 1px solid var(--line);
 }
 
-.settings-section h2 {
+.settings-section.first-section {
+  border-top: 0;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  margin: -14px -14px 0;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: #23282e;
+}
+
+.settings-section h2,
+.section-heading h2 {
   margin: 0;
   font-size: 15px;
   line-height: 1.2;
+}
+
+.section-status {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .field-grid {
@@ -531,7 +563,7 @@ button {
   width: 100%;
   height: 38px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 3px;
   background: #0f151d;
   color: var(--text);
   padding: 0 10px;
@@ -544,6 +576,19 @@ button {
 
 .password-grid {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.settings-panel > .message-area {
+  margin: 0;
+  padding: 0 14px;
+}
+
+.settings-panel > .message-area:empty {
+  display: none;
+}
+
+.settings-panel > .form-actions {
+  padding: 0 14px 14px;
 }
 
 .toggle-row {
@@ -568,7 +613,7 @@ button {
   justify-content: center;
   gap: 8px;
   height: 38px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid transparent;
   cursor: pointer;
 }
@@ -616,7 +661,7 @@ button {
 .delete-dialog {
   width: min(560px, calc(100vw - 32px));
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: var(--panel);
   color: var(--text);
   padding: 0;
@@ -658,7 +703,7 @@ button {
   overflow: auto;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 3px;
   color: #cfe0ef;
   background: #0f151d;
   white-space: pre-wrap;

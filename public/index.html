@@ -52,8 +52,8 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <h1>Duplicates</h1>
-            <p id="serverSummary">Not connected</p>
+            <h1 id="pageTitle">Duplicates</h1>
+            <p id="serverSummary">Not connected to Plex</p>
           </div>
           <div class="topbar-actions">
             <span id="userBadge" class="status-badge muted">admin</span>
@@ -107,26 +107,35 @@
 
         <section id="settingsView" class="view">
           <form id="settingsForm" class="settings-panel">
-            <div class="field-grid">
-              <label>
-                <span>Plex URL</span>
-                <input id="plexUrlInput" name="plexUrl" placeholder="http://192.168.1.10:32400" autocomplete="url">
-              </label>
-              <label>
-                <span>Token</span>
-                <input id="plexTokenInput" name="plexToken" type="password" autocomplete="off">
-              </label>
-              <label>
-                <span>Page Size</span>
-                <input id="scanPageSizeInput" name="scanPageSize" type="number" min="25" max="1000" step="25">
+            <div class="settings-section first-section">
+              <div class="section-heading">
+                <h2>Plex</h2>
+                <span id="tokenStatus" class="section-status">No token saved</span>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>Plex URL</span>
+                  <input id="plexUrlInput" name="plexUrl" placeholder="http://192.168.1.10:32400" autocomplete="url">
+                </label>
+                <label>
+                  <span>Token</span>
+                  <input id="plexTokenInput" name="plexToken" type="password" autocomplete="off" placeholder="Paste token to add or replace">
+                </label>
+                <label>
+                  <span>Page Size</span>
+                  <input id="scanPageSizeInput" name="scanPageSize" type="number" min="25" max="1000" step="25">
+                </label>
+              </div>
+              <label class="toggle-row">
+                <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
+                <span>Enable delete buttons</span>
               </label>
             </div>
-            <label class="toggle-row">
-              <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
-              <span>Enable delete buttons</span>
-            </label>
             <div class="settings-section">
-              <h2>Authentication</h2>
+              <div class="section-heading">
+                <h2>Authentication</h2>
+                <span id="authStatus" class="section-status">Built-in</span>
+              </div>
               <div class="field-grid auth-grid">
                 <label>
                   <span>Mode</span>
@@ -159,6 +168,7 @@
                 </label>
               </div>
             </div>
+            <div id="settingsMessageArea" class="message-area"></div>
             <div class="form-actions">
               <button class="primary-button" type="submit">
                 <i data-lucide="save"></i>
