@@ -130,14 +130,16 @@ button {
   letter-spacing: 0;
 }
 
+.brand-logo,
 .brand-mark {
   display: grid;
   width: 30px;
   height: 30px;
-  place-items: center;
   border-radius: 3px;
-  background: var(--accent);
-  color: #06131b;
+}
+
+.brand-logo {
+  display: block;
 }
 
 .nav-list {
