@@ -71,6 +71,17 @@
           <div class="toolbar">
             <div class="library-strip" id="libraryStrip"></div>
             <div class="toolbar-actions">
+              <label class="mode-field">
+                <span>Mode</span>
+                <select id="reviewModeSelect">
+                  <option value="manual">Manual</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </label>
+              <button id="autoSelectButton" class="secondary-button" type="button">
+                <i data-lucide="check-check"></i>
+                <span>Auto Select</span>
+              </button>
               <label class="search-field">
                 <i data-lucide="search"></i>
                 <input id="searchInput" type="search" placeholder="Filter">
@@ -140,6 +151,33 @@
                 <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
                 <span>Enable delete buttons</span>
               </label>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
+                <h2>Keep Preferences</h2>
+                <span id="selectionStatus" class="section-status">Manual</span>
+              </div>
+              <div class="field-grid preferences-grid">
+                <label>
+                  <span>Default Mode</span>
+                  <select id="selectionModeInput" name="selectionMode">
+                    <option value="manual">Manual</option>
+                    <option value="auto">Auto-select suggested</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Containers / Extensions</span>
+                  <input id="preferredContainersInput" name="preferredContainers" placeholder="mkv, mp4">
+                </label>
+                <label>
+                  <span>Video Codecs</span>
+                  <input id="preferredVideoCodecsInput" name="preferredVideoCodecs" placeholder="x265, hevc, h265">
+                </label>
+                <label>
+                  <span>Audio Codecs</span>
+                  <input id="preferredAudioCodecsInput" name="preferredAudioCodecs" placeholder="truehd, dts-hd ma">
+                </label>
+              </div>
             </div>
             <div class="settings-section">
               <div class="section-heading">

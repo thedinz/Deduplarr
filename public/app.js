@@ -4,6 +4,8 @@ const state = {
   libraries: [],
   selectedLibraries: new Set(),
   scan: null,
+  groupSelections: new Map(),
+  selectionMode: "manual",
   scanJob: null,
   scanStartedAt: null,
   scanPollTimer: null,
@@ -27,6 +29,8 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
   scanButton: document.querySelector("#scanButton"),
+  reviewModeSelect: document.querySelector("#reviewModeSelect"),
+  autoSelectButton: document.querySelector("#autoSelectButton"),
   scanProgressPanel: document.querySelector("#scanProgressPanel"),
   scanProgressText: document.querySelector("#scanProgressText"),
   scanProgressMeta: document.querySelector("#scanProgressMeta"),
@@ -44,6 +48,11 @@ const elements = {
   plexTokenInput: document.querySelector("#plexTokenInput"),
   scanPageSizeInput: document.querySelector("#scanPageSizeInput"),
   allowDeletesInput: document.querySelector("#allowDeletesInput"),
+  selectionModeInput: document.querySelector("#selectionModeInput"),
+  preferredContainersInput: document.querySelector("#preferredContainersInput"),
+  preferredVideoCodecsInput: document.querySelector("#preferredVideoCodecsInput"),
+  preferredAudioCodecsInput: document.querySelector("#preferredAudioCodecsInput"),
+  selectionStatus: document.querySelector("#selectionStatus"),
   authModeInput: document.querySelector("#authModeInput"),
   authUsernameInput: document.querySelector("#authUsernameInput"),
   externalHeadersInput: document.querySelector("#externalHeadersInput"),
@@ -126,6 +135,13 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function splitList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().replace(/^\./, "").toLowerCase())
+    .filter(Boolean);
+}
+
 function setBusy(button, busy, label) {
   button.disabled = busy;
   if (label) button.querySelector("span").textContent = label;
@@ -188,6 +204,13 @@ function renderConfig() {
     : "Paste token to add or replace";
   elements.scanPageSizeInput.value = state.config.scanPageSize || 200;
   elements.allowDeletesInput.checked = Boolean(state.config.allowDeletes);
+  state.selectionMode = state.config.selectionMode || "manual";
+  elements.reviewModeSelect.value = state.selectionMode;
+  elements.selectionModeInput.value = state.selectionMode;
+  elements.preferredContainersInput.value = (state.config.keepPreferences?.containers || []).join(", ");
+  elements.preferredVideoCodecsInput.value = (state.config.keepPreferences?.videoCodecs || []).join(", ");
+  elements.preferredAudioCodecsInput.value = (state.config.keepPreferences?.audioCodecs || []).join(", ");
+  elements.selectionStatus.textContent = state.selectionMode === "auto" ? "Auto" : "Manual";
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
   elements.authUsernameInput.value = state.config.auth?.username || "admin";
   elements.externalHeadersInput.value = (state.config.auth?.externalUserHeaders || []).join(", ");
@@ -221,7 +244,13 @@ function plexFormPayload(includeAuth = false) {
   const payload = {
     plexUrl: elements.plexUrlInput.value,
     allowDeletes: elements.allowDeletesInput.checked,
-    scanPageSize: Number(elements.scanPageSizeInput.value || 200)
+    scanPageSize: Number(elements.scanPageSizeInput.value || 200),
+    selectionMode: elements.selectionModeInput.value,
+    keepPreferences: {
+      containers: splitList(elements.preferredContainersInput.value),
+      videoCodecs: splitList(elements.preferredVideoCodecsInput.value),
+      audioCodecs: splitList(elements.preferredAudioCodecsInput.value)
+    }
   };
 
   if (elements.plexTokenInput.value) {
@@ -276,6 +305,36 @@ function renderStats(stats = {}) {
   elements.libraryCount.textContent = stats.libraries || state.libraries.length || 0;
 }
 
+function initializeGroupSelections() {
+  state.groupSelections = new Map();
+  if (state.selectionMode !== "auto") return;
+
+  for (const group of state.scan?.groups || []) {
+    const suggested = group.suggestedFileId || group.bestFileId;
+    if (suggested) state.groupSelections.set(group.id, suggested);
+  }
+}
+
+function autoSelectSuggested() {
+  for (const group of state.scan?.groups || []) {
+    const suggested = group.suggestedFileId || group.bestFileId;
+    if (suggested) state.groupSelections.set(group.id, suggested);
+  }
+  renderGroups();
+}
+
+function setReviewMode(mode) {
+  state.selectionMode = mode === "auto" ? "auto" : "manual";
+  elements.reviewModeSelect.value = state.selectionMode;
+  elements.selectionModeInput.value = state.selectionMode;
+  elements.selectionStatus.textContent = state.selectionMode === "auto" ? "Auto" : "Manual";
+  if (state.selectionMode === "auto") autoSelectSuggested();
+  else {
+    state.groupSelections.clear();
+    renderGroups();
+  }
+}
+
 function fileVideoLabel(file) {
   const resolution = file.height ? `${file.width || "?"}x${file.height}` : file.videoResolution || "Unknown";
   return [resolution, file.videoCodec?.toUpperCase(), file.videoProfile]
@@ -290,13 +349,25 @@ function fileAudioLabel(file) {
   return [codec, channels, streams].filter(Boolean).join(" | ");
 }
 
-function deleteButton(file, isBest) {
-  const disabled = !state.config?.allowDeletes || isBest ? "disabled" : "";
-  const title = isBest
-    ? "Best-scored file"
-    : state.config?.allowDeletes
-      ? "Delete"
-      : "Deletes disabled";
+function keepButton(group, file, isSelectedKeep) {
+  const title = isSelectedKeep ? "Selected keeper" : "Select keeper";
+  return `
+    <button class="icon-button keep-file-button ${isSelectedKeep ? "selected" : ""}" data-group-id="${escapeHtml(group.id)}" data-file-id="${escapeHtml(file.id)}" title="${title}">
+      <i data-lucide="${isSelectedKeep ? "check-circle-2" : "circle"}"></i>
+    </button>
+  `;
+}
+
+function deleteButton(file, selectedFileId) {
+  const isSelectedKeep = file.id === selectedFileId;
+  const disabled = !state.config?.allowDeletes || !selectedFileId || isSelectedKeep ? "disabled" : "";
+  const title = !state.config?.allowDeletes
+    ? "Deletes disabled"
+    : !selectedFileId
+      ? "Choose keeper first"
+      : isSelectedKeep
+        ? "Selected keeper"
+        : "Delete";
   return `
     <button class="icon-button delete-file-button" data-file-id="${escapeHtml(file.id)}" ${disabled} title="${title}">
       <i data-lucide="trash-2"></i>
@@ -322,16 +393,20 @@ function renderGroups() {
 
   elements.duplicatesList.innerHTML = groups
     .map((group) => {
+      const suggestedFileId = group.suggestedFileId || group.bestFileId;
+      const selectedFileId = state.groupSelections.get(group.id) || "";
       const rows = group.files
         .map((file) => {
-          const isBest = file.id === group.bestFileId;
+          const isSuggested = file.id === suggestedFileId;
+          const isSelectedKeep = file.id === selectedFileId;
           return `
-            <div class="file-row">
-              <div class="score ${isBest ? "best" : ""}">${file.score.value}</div>
+            <div class="file-row ${isSelectedKeep ? "selected-keep" : ""} ${isSuggested ? "suggested-file" : ""}">
+              <div class="score ${isSuggested ? "suggested" : ""}">${file.score.value}</div>
               <div class="file-main">
                 <div class="file-name">
                   <span>${escapeHtml(file.fileName || file.file)}</span>
-                  ${isBest ? '<span class="keep-badge">Keep</span>' : ""}
+                  ${isSuggested ? '<span class="suggested-badge">Suggested</span>' : ""}
+                  ${isSelectedKeep ? '<span class="keep-badge">Keep</span>' : ""}
                 </div>
                 <div class="file-path">${escapeHtml(file.file)}</div>
               </div>
@@ -344,7 +419,10 @@ function renderGroups() {
                 <span>${escapeHtml(`${file.container || file.extension || "file"} | ${formatDuration(file.duration)}`)}</span>
               </div>
               <div class="file-size">${formatBytes(file.size)}</div>
-              ${deleteButton(file, isBest)}
+              <div class="row-actions">
+                ${keepButton(group, file, isSelectedKeep)}
+                ${deleteButton(file, selectedFileId)}
+              </div>
             </div>
           `;
         })
@@ -360,6 +438,7 @@ function renderGroups() {
             <div class="group-meta">
               <span class="pill">${escapeHtml(group.reason)}</span>
               <span class="pill">${group.files.length} files</span>
+              <span class="pill">${selectedFileId ? "Keeper selected" : "Choose keeper"}</span>
             </div>
           </header>
           ${rows}
@@ -368,6 +447,12 @@ function renderGroups() {
     })
     .join("");
 
+  elements.duplicatesList.querySelectorAll(".keep-file-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.groupSelections.set(button.dataset.groupId, button.dataset.fileId);
+      renderGroups();
+    });
+  });
   elements.duplicatesList.querySelectorAll(".delete-file-button").forEach((button) => {
     button.addEventListener("click", () => openDelete(button.dataset.fileId));
   });
@@ -464,6 +549,7 @@ async function scan() {
     }
 
     state.scan = state.scanJob.result;
+    initializeGroupSelections();
     renderStats(state.scan.stats);
     renderGroups();
     if (state.scan.errors?.length) {
@@ -495,6 +581,7 @@ async function saveSettings(event) {
   }
 
   const payload = plexFormPayload(true);
+  const previousSelectionMode = state.selectionMode;
 
   try {
     setBusy(elements.settingsForm.querySelector("button[type='submit']"), true, "Saving");
@@ -503,6 +590,10 @@ async function saveSettings(event) {
       body: JSON.stringify(payload)
     });
     renderConfig();
+    if (state.scan && previousSelectionMode !== state.selectionMode) {
+      initializeGroupSelections();
+      renderGroups();
+    }
     setSettingsMessage(
       state.config.hasToken
         ? "Settings saved. Plex token is stored and hidden."
@@ -601,7 +692,10 @@ function setupEvents() {
   elements.logoutButton.addEventListener("click", logout);
   elements.refreshButton.addEventListener("click", refreshConnection);
   elements.scanButton.addEventListener("click", scan);
+  elements.reviewModeSelect.addEventListener("change", () => setReviewMode(elements.reviewModeSelect.value));
+  elements.autoSelectButton.addEventListener("click", autoSelectSuggested);
   elements.searchInput.addEventListener("input", renderGroups);
+  elements.selectionModeInput.addEventListener("change", () => setReviewMode(elements.selectionModeInput.value));
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);
   elements.confirmDeleteButton.addEventListener("click", deleteActiveFile);

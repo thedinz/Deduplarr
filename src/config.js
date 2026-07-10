@@ -10,6 +10,11 @@ const DEFAULT_EXTERNAL_HEADERS = [
   "x-authentik-username",
   "remote-user"
 ];
+const DEFAULT_KEEP_PREFERENCES = {
+  containers: [],
+  videoCodecs: [],
+  audioCodecs: []
+};
 
 const processSessionSecret = crypto.randomBytes(32).toString("hex");
 
@@ -27,6 +32,29 @@ function cleanExternalHeaders(value) {
 
 function authMode(value) {
   return value === "external" ? "external" : "builtin";
+}
+
+function selectionMode(value) {
+  return value === "auto" ? "auto" : "manual";
+}
+
+function cleanPreferenceList(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(",");
+  return [
+    ...new Set(
+      source
+        .map((item) => String(item).trim().replace(/^\./, "").toLowerCase())
+        .filter(Boolean)
+    )
+  ];
+}
+
+function keepPreferences(value = {}) {
+  return {
+    containers: cleanPreferenceList(value.containers),
+    videoCodecs: cleanPreferenceList(value.videoCodecs),
+    audioCodecs: cleanPreferenceList(value.audioCodecs)
+  };
 }
 
 export function defaultAuthConfig(storedAuth = {}) {
@@ -57,6 +85,8 @@ export async function getRuntimeConfig() {
     plexToken: stored.plexToken || "",
     allowDeletes: Boolean(stored.allowDeletes),
     scanPageSize: Number(stored.scanPageSize || 200),
+    selectionMode: selectionMode(stored.selectionMode),
+    keepPreferences: keepPreferences(stored.keepPreferences || DEFAULT_KEEP_PREFERENCES),
     auth,
     sessionSecret:
       process.env.SESSION_SECRET || stored.sessionSecret || processSessionSecret
@@ -92,6 +122,14 @@ export async function saveConfig(input, options = {}) {
         ? Boolean(current.allowDeletes)
         : Boolean(input.allowDeletes),
     scanPageSize: Number(input.scanPageSize || current.scanPageSize || 200),
+    selectionMode:
+      input.selectionMode === undefined
+        ? selectionMode(current.selectionMode)
+        : selectionMode(input.selectionMode),
+    keepPreferences:
+      input.keepPreferences === undefined
+        ? keepPreferences(current.keepPreferences || DEFAULT_KEEP_PREFERENCES)
+        : keepPreferences(input.keepPreferences),
     auth: nextAuth,
     sessionSecret:
       current.sessionSecret || process.env.SESSION_SECRET || processSessionSecret
@@ -108,6 +146,8 @@ export function publicConfig(config) {
     hasToken: Boolean(config.plexToken),
     allowDeletes: Boolean(config.allowDeletes),
     scanPageSize: config.scanPageSize,
+    selectionMode: config.selectionMode,
+    keepPreferences: config.keepPreferences,
     auth: {
       mode: config.auth.mode,
       username: config.auth.username,

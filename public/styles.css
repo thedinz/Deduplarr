@@ -310,6 +310,26 @@ button {
   color: var(--muted);
 }
 
+.mode-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.mode-field select {
+  height: 38px;
+  min-width: 112px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 9px;
+}
+
 .search-field input {
   min-width: 0;
   width: 100%;
@@ -421,11 +441,19 @@ button {
 
 .file-row {
   display: grid;
-  grid-template-columns: 78px minmax(220px, 1.6fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) 106px 48px;
+  grid-template-columns: 78px minmax(220px, 1.6fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) 106px 92px;
   gap: 12px;
   align-items: center;
   padding: 10px 14px;
   border-bottom: 1px solid rgba(44, 54, 68, 0.7);
+}
+
+.file-row.selected-keep {
+  background: rgba(85, 179, 122, 0.08);
+}
+
+.file-row.suggested-file:not(.selected-keep) {
+  background: rgba(47, 155, 204, 0.06);
 }
 
 .file-row:last-child {
@@ -444,6 +472,7 @@ button {
   font-weight: 700;
 }
 
+.score.suggested,
 .score.best {
   background: rgba(85, 179, 122, 0.16);
   border-color: rgba(85, 179, 122, 0.58);
@@ -469,13 +498,20 @@ button {
   white-space: nowrap;
 }
 
-.keep-badge {
+.keep-badge,
+.suggested-badge {
   color: #dff7e8;
   background: rgba(85, 179, 122, 0.16);
   border: 1px solid rgba(85, 179, 122, 0.5);
   border-radius: 3px;
   padding: 2px 6px;
   font-size: 11px;
+}
+
+.suggested-badge {
+  color: #d8f3ff;
+  background: rgba(47, 155, 204, 0.16);
+  border-color: rgba(72, 184, 232, 0.48);
 }
 
 .file-path {
@@ -505,6 +541,18 @@ button {
   color: var(--muted);
   font-size: 12px;
   margin-top: 3px;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.keep-file-button.selected {
+  border-color: rgba(85, 179, 122, 0.6);
+  background: rgba(85, 179, 122, 0.14);
+  color: #dff7e8;
 }
 
 .message-area {
@@ -614,6 +662,10 @@ button {
 
 .auth-grid {
   grid-template-columns: minmax(150px, 0.45fr) minmax(180px, 0.55fr) minmax(260px, 1fr);
+}
+
+.preferences-grid {
+  grid-template-columns: minmax(150px, 0.5fr) repeat(3, minmax(180px, 1fr));
 }
 
 .password-grid {
@@ -792,6 +844,7 @@ svg {
   .toolbar-actions,
   .topbar-actions {
     justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .search-field {
@@ -803,13 +856,18 @@ svg {
   }
 
   .file-row {
-    grid-template-columns: 64px minmax(0, 1fr) 42px;
+    grid-template-columns: 64px minmax(0, 1fr) 92px;
     align-items: start;
   }
 
   .file-detail,
   .file-size {
     grid-column: 2 / 3;
+  }
+
+  .row-actions {
+    grid-column: 3 / 4;
+    grid-row: 1;
   }
 
   .field-grid {

@@ -91,7 +91,7 @@ function bestAudioStream(audioStreams) {
   })[0] || {};
 }
 
-function flattenVersions(item, library) {
+function flattenVersions(item, library, keepPreferences = {}) {
   const mediaItems = asArray(item.Media);
   const records = [];
 
@@ -145,12 +145,12 @@ function flattenVersions(item, library) {
         subtitleStreams: streams.subtitles
       };
 
-      record.score = scoreMedia(record);
+      record.score = scoreMedia(record, keepPreferences);
       records.push(record);
     });
   });
 
-  return records.sort((a, b) => b.score.value - a.score.value);
+  return records.sort((a, b) => b.score.preferenceRank - a.score.preferenceRank);
 }
 
 function duplicateReason(item, files, cameFromDuplicateFilter) {
@@ -183,6 +183,7 @@ export class PlexClient {
     this.baseUrl = normalizeBaseUrl(config.plexUrl);
     this.token = config.plexToken;
     this.pageSize = Math.max(25, Math.min(Number(config.scanPageSize || 200), 1000));
+    this.keepPreferences = config.keepPreferences || {};
     if (!this.token) throw new Error("Plex token is required.");
   }
 
@@ -385,7 +386,7 @@ export class PlexClient {
         message: `Scoring duplicates in ${library.title}`
       });
       for (const item of detailed) {
-        const files = flattenVersions(item, library);
+        const files = flattenVersions(item, library, this.keepPreferences);
         const mediaCount = asArray(item.Media).length;
         const isDuplicate =
           mediaCount > 1 || (usedDuplicateFilter && files.length > 1);
@@ -406,6 +407,7 @@ export class PlexClient {
           duration: number(item.duration),
           reason: duplicateReason(item, files, usedDuplicateFilter),
           bestFileId: files[0]?.id || "",
+          suggestedFileId: files[0]?.id || "",
           files
         });
       }
