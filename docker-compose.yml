@@ -3,16 +3,16 @@ services:
     image: ghcr.io/thedinz/deduplarr:dev
     container_name: deduplarr
     ports:
-      - "7878:7878"
+      - "7889:7889"
     environment:
-      PORT: "7878"
+      PORT: "7889"
       CONFIG_DIR: /config
       # Optional: persist browser sessions across container restarts.
       # SESSION_SECRET: change-me-to-a-long-random-string
     volumes:
       - ./config:/config
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7878/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7889/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
