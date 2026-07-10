@@ -1,5 +1,6 @@
 const state = {
   config: null,
+  session: null,
   libraries: [],
   selectedLibraries: new Set(),
   scan: null,
@@ -7,9 +8,18 @@ const state = {
 };
 
 const elements = {
+  loginShell: document.querySelector("#loginShell"),
+  appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginHint: document.querySelector("#loginHint"),
+  loginUsernameInput: document.querySelector("#loginUsernameInput"),
+  loginPasswordInput: document.querySelector("#loginPasswordInput"),
+  loginMessage: document.querySelector("#loginMessage"),
   serverSummary: document.querySelector("#serverSummary"),
+  userBadge: document.querySelector("#userBadge"),
   connectionBadge: document.querySelector("#connectionBadge"),
   refreshButton: document.querySelector("#refreshButton"),
+  logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
   scanButton: document.querySelector("#scanButton"),
   searchInput: document.querySelector("#searchInput"),
@@ -24,6 +34,12 @@ const elements = {
   plexTokenInput: document.querySelector("#plexTokenInput"),
   scanPageSizeInput: document.querySelector("#scanPageSizeInput"),
   allowDeletesInput: document.querySelector("#allowDeletesInput"),
+  authModeInput: document.querySelector("#authModeInput"),
+  authUsernameInput: document.querySelector("#authUsernameInput"),
+  externalHeadersInput: document.querySelector("#externalHeadersInput"),
+  currentPasswordInput: document.querySelector("#currentPasswordInput"),
+  authPasswordInput: document.querySelector("#authPasswordInput"),
+  authPasswordConfirmInput: document.querySelector("#authPasswordConfirmInput"),
   testButton: document.querySelector("#testButton"),
   deleteDialog: document.querySelector("#deleteDialog"),
   deleteFileName: document.querySelector("#deleteFileName"),
@@ -39,6 +55,7 @@ function icons() {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
@@ -46,6 +63,9 @@ async function api(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && !["/api/session", "/api/login"].includes(path)) {
+      showLogin(data);
+    }
     throw new Error(data.error || `${response.status} ${response.statusText}`);
   }
   return data;
@@ -74,6 +94,12 @@ function setMessage(message, type = "") {
     : "";
 }
 
+function setLoginMessage(message, type = "") {
+  elements.loginMessage.innerHTML = message
+    ? `<div class="message ${type}">${escapeHtml(message)}</div>`
+    : "";
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -87,12 +113,39 @@ function setBusy(button, busy, label) {
   if (label) button.querySelector("span").textContent = label;
 }
 
+function showLogin(sessionInfo = {}) {
+  state.session = null;
+  elements.appShell.classList.add("is-hidden");
+  elements.loginShell.classList.remove("is-hidden");
+
+  const external = sessionInfo.authMode === "external";
+  elements.loginForm.classList.toggle("external-login", external);
+  elements.loginHint.textContent = external
+    ? "External auth is enabled. Sign in through your reverse proxy."
+    : "Default login is admin/admin.";
+  icons();
+}
+
+function showApp(session) {
+  state.session = session;
+  elements.loginShell.classList.add("is-hidden");
+  elements.appShell.classList.remove("is-hidden");
+  elements.userBadge.textContent = session?.user?.username || "admin";
+  icons();
+}
+
 function renderConfig() {
   if (!state.config) return;
   elements.plexUrlInput.value = state.config.plexUrl || "";
   elements.plexTokenInput.value = "";
   elements.scanPageSizeInput.value = state.config.scanPageSize || 200;
   elements.allowDeletesInput.checked = Boolean(state.config.allowDeletes);
+  elements.authModeInput.value = state.config.auth?.mode || "builtin";
+  elements.authUsernameInput.value = state.config.auth?.username || "admin";
+  elements.externalHeadersInput.value = (state.config.auth?.externalUserHeaders || []).join(", ");
+  elements.currentPasswordInput.value = "";
+  elements.authPasswordInput.value = "";
+  elements.authPasswordConfirmInput.value = "";
 }
 
 function setOnline(summary) {
@@ -104,7 +157,7 @@ function setOnline(summary) {
     summary.platform
   ]
     .filter(Boolean)
-    .join(" • ");
+    .join(" | ");
 }
 
 function setOffline(message = "Not connected") {
@@ -151,14 +204,14 @@ function fileVideoLabel(file) {
   const resolution = file.height ? `${file.width || "?"}x${file.height}` : file.videoResolution || "Unknown";
   return [resolution, file.videoCodec?.toUpperCase(), file.videoProfile]
     .filter(Boolean)
-    .join(" • ");
+    .join(" | ");
 }
 
 function fileAudioLabel(file) {
   const codec = file.audioCodec ? file.audioCodec.toUpperCase() : "Unknown";
   const channels = file.audioChannels ? `${file.audioChannels} ch` : "";
   const streams = file.audioStreams?.length > 1 ? `${file.audioStreams.length} streams` : "";
-  return [codec, channels, streams].filter(Boolean).join(" • ");
+  return [codec, channels, streams].filter(Boolean).join(" | ");
 }
 
 function deleteButton(file, isBest) {
@@ -208,11 +261,11 @@ function renderGroups() {
               </div>
               <div class="file-detail">
                 <strong>${escapeHtml(fileVideoLabel(file))}</strong>
-                <span>${escapeHtml(file.score.reasons.join(" • "))}</span>
+                <span>${escapeHtml(file.score.reasons.join(" | "))}</span>
               </div>
               <div class="file-detail">
                 <strong>${escapeHtml(fileAudioLabel(file))}</strong>
-                <span>${escapeHtml(`${file.container || file.extension || "file"} • ${formatDuration(file.duration)}`)}</span>
+                <span>${escapeHtml(`${file.container || file.extension || "file"} | ${formatDuration(file.duration)}`)}</span>
               </div>
               <div class="file-size">${formatBytes(file.size)}</div>
               ${deleteButton(file, isBest)}
@@ -226,7 +279,7 @@ function renderGroups() {
           <header class="group-header">
             <div class="group-title">
               <h2>${escapeHtml(group.title)}</h2>
-              <p>${escapeHtml([group.libraryTitle, group.subtitle].filter(Boolean).join(" • "))}</p>
+              <p>${escapeHtml([group.libraryTitle, group.subtitle].filter(Boolean).join(" | "))}</p>
             </div>
             <div class="group-meta">
               <span class="pill">${escapeHtml(group.reason)}</span>
@@ -326,21 +379,65 @@ async function scan() {
 
 async function saveSettings(event) {
   event.preventDefault();
+  if (elements.authPasswordInput.value !== elements.authPasswordConfirmInput.value) {
+    setMessage("New password confirmation does not match.", "error");
+    return;
+  }
+
   const payload = {
     plexUrl: elements.plexUrlInput.value,
     allowDeletes: elements.allowDeletesInput.checked,
-    scanPageSize: Number(elements.scanPageSizeInput.value || 200)
+    scanPageSize: Number(elements.scanPageSizeInput.value || 200),
+    authMode: elements.authModeInput.value,
+    authUsername: elements.authUsernameInput.value,
+    externalUserHeaders: elements.externalHeadersInput.value
   };
   if (elements.plexTokenInput.value) {
     payload.plexToken = elements.plexTokenInput.value;
   }
+  if (elements.authPasswordInput.value) {
+    payload.currentPassword = elements.currentPasswordInput.value;
+    payload.authPassword = elements.authPasswordInput.value;
+    payload.authPasswordConfirm = elements.authPasswordConfirmInput.value;
+  }
 
-  state.config = await api("/api/config", {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-  renderConfig();
-  await refreshConnection();
+  try {
+    state.config = await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderConfig();
+    await refreshConnection();
+    setMessage("Settings saved.");
+  } catch (error) {
+    setMessage(error.message, "error");
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  setBusy(elements.loginForm.querySelector("button"), true, "Signing in");
+  setLoginMessage("");
+  try {
+    const session = await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: elements.loginUsernameInput.value,
+        password: elements.loginPasswordInput.value
+      })
+    });
+    showApp(session);
+    await refreshConnection();
+  } catch (error) {
+    setLoginMessage(error.message, "error");
+  } finally {
+    setBusy(elements.loginForm.querySelector("button"), false, "Sign In");
+  }
+}
+
+async function logout() {
+  await api("/api/logout", { method: "POST" }).catch(() => {});
+  showLogin({ authMode: state.config?.auth?.mode || "builtin" });
 }
 
 async function deleteActiveFile(event) {
@@ -377,6 +474,8 @@ function setupNavigation() {
 }
 
 function setupEvents() {
+  elements.loginForm.addEventListener("submit", login);
+  elements.logoutButton.addEventListener("click", logout);
   elements.refreshButton.addEventListener("click", refreshConnection);
   elements.scanButton.addEventListener("click", scan);
   elements.searchInput.addEventListener("input", renderGroups);
@@ -391,9 +490,16 @@ async function boot() {
   setupEvents();
   renderStats();
   try {
-    await refreshConnection();
+    const session = await api("/api/session");
+    if (session.authenticated) {
+      showApp(session);
+      await refreshConnection();
+    } else {
+      showLogin(session);
+    }
   } catch (error) {
-    setMessage(error.message, "error");
+    showLogin({ authMode: "builtin" });
+    setLoginMessage(error.message, "error");
   }
 }
 

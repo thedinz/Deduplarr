@@ -1,6 +1,6 @@
 # Deduplarr
 
-Deduplarr is a Docker-first Plex duplicate cleanup companion with an interface shaped for the *arr ecosystem. It connects to Plex with a server URL and token, finds duplicate movie and episode versions, shows file paths and stream details, scores each version, and lets you make the keep/delete decision at a glance.
+Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an interface shaped for the *arr ecosystem. It connects to Plex with a server URL and token, finds duplicate movie and episode versions, shows file paths and stream details, scores each version, and lets you make the keep/delete decision at a glance.
 
 ## Plex Access Model
 
@@ -8,23 +8,43 @@ The first version is intentionally API-only. Plex already knows each library ite
 
 Deletion is different: Deduplarr asks Plex to delete the selected media part. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
 
-## Run
-
-```bash
-docker run -d \
-  --name deduplarr \
-  -p 7878:7878 \
-  -v deduplarr-config:/config \
-  ghcr.io/thedinz/deduplarr:dev
-```
-
-Open `http://localhost:7878`, then add your Plex URL and token in Settings.
-
 ## Docker Compose
+
+Plex connection details are entered in the app Settings page, not in Compose environment variables.
+
+```yaml
+services:
+  deduplarr:
+    image: ghcr.io/thedinz/deduplarr:dev
+    container_name: deduplarr
+    ports:
+      - "7878:7878"
+    environment:
+      PORT: "7878"
+      CONFIG_DIR: /config
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
+```
 
 ```bash
 docker compose up -d
 ```
+
+Open `http://localhost:7878`, sign in with `admin/admin`, then add your Plex URL and token in Settings.
+
+## Authentication
+
+Deduplarr starts with built-in auth enabled and the default login `admin/admin`. Change the username and password from Settings after first sign-in.
+
+Settings also supports switching to external reverse-proxy auth. In that mode Deduplarr trusts a configured user header from your proxy. Default accepted headers are:
+
+- `x-forwarded-user`
+- `x-auth-request-user`
+- `x-authentik-username`
+- `remote-user`
+
+Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so forwarded protocol headers work correctly for cookies.
 
 ## Environment
 
@@ -32,10 +52,7 @@ docker compose up -d
 | --- | --- | --- |
 | `PORT` | `7878` | HTTP port inside the container |
 | `CONFIG_DIR` | `/config` in Docker | Stores local app config |
-| `PLEX_URL` | empty | Plex server URL, for example `http://192.168.1.10:32400` |
-| `PLEX_TOKEN` | empty | Plex token |
-| `SCAN_PAGE_SIZE` | `200` | Plex pagination size |
-| `ENABLE_DESTRUCTIVE_ACTIONS` | `false` | Enables delete buttons |
+| `SESSION_SECRET` | generated | Optional stable session signing secret |
 
 ## Development
 

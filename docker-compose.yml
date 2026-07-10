@@ -7,9 +7,13 @@ services:
     environment:
       PORT: "7878"
       CONFIG_DIR: /config
-      # PLEX_URL: http://192.168.1.10:32400
-      # PLEX_TOKEN: your-plex-token
-      # ENABLE_DESTRUCTIVE_ACTIONS: "false"
+      # Optional: persist browser sessions across container restarts.
+      # SESSION_SECRET: change-me-to-a-long-random-string
     volumes:
       - ./config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7878/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped

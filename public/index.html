@@ -7,7 +7,31 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <div class="app-shell">
+    <div id="loginShell" class="login-shell">
+      <form id="loginForm" class="login-panel">
+        <div class="brand login-brand">
+          <span class="brand-mark">D</span>
+          <span>Deduplarr</span>
+        </div>
+        <h1>Sign In</h1>
+        <p id="loginHint">Default login is admin/admin.</p>
+        <label>
+          <span>Username</span>
+          <input id="loginUsernameInput" autocomplete="username" value="admin">
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="loginPasswordInput" type="password" autocomplete="current-password" value="admin">
+        </label>
+        <button class="primary-button" type="submit">
+          <i data-lucide="log-in"></i>
+          <span>Sign In</span>
+        </button>
+        <div id="loginMessage" class="message-area"></div>
+      </form>
+    </div>
+
+    <div id="appShell" class="app-shell is-hidden">
       <aside class="sidebar">
         <div class="brand">
           <span class="brand-mark">D</span>
@@ -32,9 +56,13 @@
             <p id="serverSummary">Not connected</p>
           </div>
           <div class="topbar-actions">
+            <span id="userBadge" class="status-badge muted">admin</span>
             <span id="connectionBadge" class="status-badge muted">Offline</span>
             <button id="refreshButton" class="icon-button" title="Refresh">
               <i data-lucide="refresh-cw"></i>
+            </button>
+            <button id="logoutButton" class="icon-button" title="Sign out">
+              <i data-lucide="log-out"></i>
             </button>
           </div>
         </header>
@@ -97,6 +125,40 @@
               <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
               <span>Enable delete buttons</span>
             </label>
+            <div class="settings-section">
+              <h2>Authentication</h2>
+              <div class="field-grid auth-grid">
+                <label>
+                  <span>Mode</span>
+                  <select id="authModeInput" name="authMode">
+                    <option value="builtin">Built-in</option>
+                    <option value="external">External reverse proxy</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input id="authUsernameInput" name="authUsername" autocomplete="username">
+                </label>
+                <label>
+                  <span>External user headers</span>
+                  <input id="externalHeadersInput" name="externalUserHeaders" placeholder="x-forwarded-user, x-auth-request-user">
+                </label>
+              </div>
+              <div class="field-grid password-grid">
+                <label>
+                  <span>Current password</span>
+                  <input id="currentPasswordInput" name="currentPassword" type="password" autocomplete="current-password">
+                </label>
+                <label>
+                  <span>New password</span>
+                  <input id="authPasswordInput" name="authPassword" type="password" autocomplete="new-password">
+                </label>
+                <label>
+                  <span>Confirm new password</span>
+                  <input id="authPasswordConfirmInput" name="authPasswordConfirm" type="password" autocomplete="new-password">
+                </label>
+              </div>
+            </div>
             <div class="form-actions">
               <button class="primary-button" type="submit">
                 <i data-lucide="save"></i>
