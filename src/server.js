@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 7878);
+const scanJobs = new Map();
 
 app.disable("x-powered-by");
 app.set("trust proxy", true);
@@ -28,6 +30,67 @@ function asyncRoute(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
   };
+}
+
+function serializeScanJob(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    message: job.message,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+    finishedAt: job.finishedAt,
+    result: job.result,
+    error: job.error
+  };
+}
+
+function updateScanJob(id, patch) {
+  const job = scanJobs.get(id);
+  if (!job) return null;
+  Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  return job;
+}
+
+function cleanupScanJobs() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [id, job] of scanJobs.entries()) {
+    const finished = Date.parse(job.finishedAt || job.updatedAt || job.startedAt);
+    if (finished < cutoff) scanJobs.delete(id);
+  }
+}
+
+async function runScanJob(id, config, libraryKeys) {
+  try {
+    const client = new PlexClient(config);
+    updateScanJob(id, {
+      status: "running",
+      progress: 2,
+      message: "Connecting to Plex"
+    });
+    const result = await client.duplicates(libraryKeys, {
+      onProgress: (progress) => updateScanJob(id, progress)
+    });
+    updateScanJob(id, {
+      status: "completed",
+      progress: 100,
+      message: "Scan complete",
+      finishedAt: new Date().toISOString(),
+      result: {
+        ...result,
+        scannedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    updateScanJob(id, {
+      status: "failed",
+      progress: 100,
+      message: "Scan failed",
+      finishedAt: new Date().toISOString(),
+      error: error.message || "Scan failed"
+    });
+  }
 }
 
 async function clientFromConfig() {
@@ -202,15 +265,38 @@ app.get(
 app.post(
   "/api/scan",
   asyncRoute(async (request, response) => {
-    const client = await clientFromConfig();
+    cleanupScanJobs();
+    const config = request.runtimeConfig || (await getRuntimeConfig());
     const libraryKeys = Array.isArray(request.body?.libraryKeys)
       ? request.body.libraryKeys.map(String)
       : [];
-    const result = await client.duplicates(libraryKeys);
-    response.json({
-      ...result,
-      scannedAt: new Date().toISOString()
-    });
+    const job = {
+      id: crypto.randomUUID(),
+      status: "queued",
+      progress: 0,
+      message: "Queued",
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      finishedAt: null,
+      result: null,
+      error: null
+    };
+    scanJobs.set(job.id, job);
+    runScanJob(job.id, config, libraryKeys);
+    response.status(202).json(serializeScanJob(job));
+  })
+);
+
+app.get(
+  "/api/scan/:scanId",
+  asyncRoute(async (request, response) => {
+    const job = scanJobs.get(request.params.scanId);
+    if (!job) {
+      response.status(404).json({ error: "Scan job not found." });
+      return;
+    }
+
+    response.json(serializeScanJob(job));
   })
 );
 

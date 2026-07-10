@@ -4,6 +4,10 @@ const state = {
   libraries: [],
   selectedLibraries: new Set(),
   scan: null,
+  scanJob: null,
+  scanStartedAt: null,
+  scanPollTimer: null,
+  scanElapsedTimer: null,
   activeDelete: null
 };
 
@@ -23,6 +27,10 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
   scanButton: document.querySelector("#scanButton"),
+  scanProgressPanel: document.querySelector("#scanProgressPanel"),
+  scanProgressText: document.querySelector("#scanProgressText"),
+  scanProgressMeta: document.querySelector("#scanProgressMeta"),
+  scanProgressFill: document.querySelector("#scanProgressFill"),
   searchInput: document.querySelector("#searchInput"),
   groupCount: document.querySelector("#groupCount"),
   fileCount: document.querySelector("#fileCount"),
@@ -121,6 +129,33 @@ function escapeHtml(value) {
 function setBusy(button, busy, label) {
   button.disabled = busy;
   if (label) button.querySelector("span").textContent = label;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function renderScanProgress(job, startedAt = state.scanStartedAt) {
+  const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
+  const elapsed = startedAt ? Date.now() - startedAt : 0;
+  elements.scanProgressPanel.classList.remove("is-hidden");
+  elements.scanProgressText.textContent = job?.message || "Scanning";
+  elements.scanProgressMeta.textContent = `${Math.round(progress)}% | ${formatElapsed(elapsed)}`;
+  elements.scanProgressFill.style.width = `${progress}%`;
+}
+
+function clearScanTimers() {
+  if (state.scanPollTimer) {
+    clearTimeout(state.scanPollTimer);
+    state.scanPollTimer = null;
+  }
+  if (state.scanElapsedTimer) {
+    clearInterval(state.scanElapsedTimer);
+    state.scanElapsedTimer = null;
+  }
 }
 
 function showLogin(sessionInfo = {}) {
@@ -397,23 +432,56 @@ async function refreshConnection() {
 }
 
 async function scan() {
+  clearScanTimers();
   setBusy(elements.scanButton, true, "Scanning");
   setMessage("");
+  state.scanStartedAt = Date.now();
+  state.scanJob = { status: "queued", progress: 0, message: "Starting scan" };
+  renderScanProgress(state.scanJob);
+  state.scanElapsedTimer = setInterval(() => {
+    if (state.scanJob) renderScanProgress(state.scanJob);
+  }, 1000);
+
   try {
-    state.scan = await api("/api/scan", {
+    state.scanJob = await api("/api/scan", {
       method: "POST",
       body: JSON.stringify({
         libraryKeys: [...state.selectedLibraries]
       })
     });
+    renderScanProgress(state.scanJob);
+
+    while (["queued", "running"].includes(state.scanJob.status)) {
+      await new Promise((resolve) => {
+        state.scanPollTimer = setTimeout(resolve, 700);
+      });
+      state.scanJob = await api(`/api/scan/${state.scanJob.id}`);
+      renderScanProgress(state.scanJob);
+    }
+
+    if (state.scanJob.status === "failed") {
+      throw new Error(state.scanJob.error || "Scan failed.");
+    }
+
+    state.scan = state.scanJob.result;
     renderStats(state.scan.stats);
     renderGroups();
     if (state.scan.errors?.length) {
       setMessage(state.scan.errors.map((error) => `${error.library}: ${error.message}`).join(" | "), "error");
     }
   } catch (error) {
+    state.scanJob = {
+      ...(state.scanJob || {}),
+      status: "failed",
+      progress: 100,
+      message: "Scan failed",
+      error: error.message
+    };
+    renderScanProgress(state.scanJob);
     setMessage(error.message, "error");
   } finally {
+    clearScanTimers();
+    if (state.scanJob) renderScanProgress(state.scanJob);
     setBusy(elements.scanButton, false, "Scan");
   }
 }

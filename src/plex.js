@@ -250,7 +250,7 @@ export class PlexClient {
     }));
   }
 
-  async listSectionItems(library, onlyDuplicates = true) {
+  async listSectionItems(library, onlyDuplicates = true, onPage = () => {}) {
     const type =
       library.type === "movie" ? 1 : library.type === "show" ? 4 : undefined;
     const items = [];
@@ -276,6 +276,11 @@ export class PlexClient {
 
       const size = number(container.size, page.length);
       total = number(container.totalSize, start + size);
+      onPage({
+        loaded: items.length,
+        total,
+        library
+      });
       if (size === 0) break;
       start += size;
     }
@@ -293,7 +298,9 @@ export class PlexClient {
     return metadataList(container)[0] || null;
   }
 
-  async duplicates(libraryKeys = []) {
+  async duplicates(libraryKeys = [], options = {}) {
+    const onProgress =
+      typeof options.onProgress === "function" ? options.onProgress : () => {};
     const libraries = await this.libraries();
     const selected = libraries.filter((library) => {
       const supported = ["movie", "show", "video"].includes(library.type);
@@ -304,17 +311,45 @@ export class PlexClient {
 
     const allGroups = [];
     const errors = [];
+    const totalLibraries = Math.max(selected.length, 1);
+    onProgress({
+      progress: selected.length ? 5 : 100,
+      message: selected.length
+        ? `Found ${selected.length} supported libraries`
+        : "No supported libraries selected"
+    });
 
-    for (const library of selected) {
+    for (const [libraryIndex, library] of selected.entries()) {
       let items = [];
       let usedDuplicateFilter = true;
+      const libraryBase = 5 + (libraryIndex / totalLibraries) * 90;
+      const librarySpan = 90 / totalLibraries;
+      const progressAt = (fraction) =>
+        Math.round(libraryBase + librarySpan * Math.max(0, Math.min(1, fraction)));
+
+      onProgress({
+        progress: progressAt(0.05),
+        message: `Reading ${library.title}`
+      });
 
       try {
-        items = await this.listSectionItems(library, true);
+        items = await this.listSectionItems(library, true, ({ loaded, total }) => {
+          const fraction = total ? Math.min(loaded / total, 1) : 0.2;
+          onProgress({
+            progress: progressAt(0.05 + fraction * 0.25),
+            message: `Reading ${library.title}: ${loaded}/${total || "?"} items`
+          });
+        });
       } catch (error) {
         usedDuplicateFilter = false;
         try {
-          items = await this.listSectionItems(library, false);
+          items = await this.listSectionItems(library, false, ({ loaded, total }) => {
+            const fraction = total ? Math.min(loaded / total, 1) : 0.2;
+            onProgress({
+              progress: progressAt(0.05 + fraction * 0.25),
+              message: `Reading ${library.title}: ${loaded}/${total || "?"} items`
+            });
+          });
         } catch (fallbackError) {
           errors.push({
             library: library.title,
@@ -324,15 +359,31 @@ export class PlexClient {
         }
       }
 
+      let detailedCount = 0;
+      onProgress({
+        progress: progressAt(0.35),
+        message: `Inspecting ${items.length} duplicate candidates in ${library.title}`
+      });
       const detailed = await mapLimit(items, 5, async (item) => {
-        if (!item.ratingKey) return item;
         try {
+          if (!item.ratingKey) return item;
           return (await this.itemDetails(item.ratingKey)) || item;
         } catch {
           return item;
+        } finally {
+          detailedCount += 1;
+          const detailFraction = items.length ? detailedCount / items.length : 1;
+          onProgress({
+            progress: progressAt(0.35 + detailFraction * 0.45),
+            message: `Inspecting ${library.title}: ${detailedCount}/${items.length} items`
+          });
         }
       });
 
+      onProgress({
+        progress: progressAt(0.84),
+        message: `Scoring duplicates in ${library.title}`
+      });
       for (const item of detailed) {
         const files = flattenVersions(item, library);
         const mediaCount = asArray(item.Media).length;
@@ -358,9 +409,18 @@ export class PlexClient {
           files
         });
       }
+
+      onProgress({
+        progress: progressAt(1),
+        message: `Finished ${library.title}`
+      });
     }
 
     const files = allGroups.flatMap((group) => group.files);
+    onProgress({
+      progress: 100,
+      message: `Scan complete: ${allGroups.length} duplicate groups`
+    });
     return {
       groups: allGroups.sort((a, b) => a.title.localeCompare(b.title)),
       stats: {
