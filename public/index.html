@@ -166,18 +166,39 @@
                     <option value="auto">Auto-select suggested</option>
                   </select>
                 </label>
-                <label>
+                <div class="preference-field">
                   <span>Containers / Extensions</span>
-                  <input id="preferredContainersInput" name="preferredContainers" placeholder="mkv, mp4">
-                </label>
-                <label>
+                  <div class="multi-select" data-preference="containers">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredContainersInput" name="preferredContainers" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
                   <span>Video Codecs</span>
-                  <input id="preferredVideoCodecsInput" name="preferredVideoCodecs" placeholder="x265, hevc, h265">
-                </label>
-                <label>
+                  <div class="multi-select" data-preference="videoCodecs">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredVideoCodecsInput" name="preferredVideoCodecs" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
                   <span>Audio Codecs</span>
-                  <input id="preferredAudioCodecsInput" name="preferredAudioCodecs" placeholder="truehd, dts-hd ma">
-                </label>
+                  <div class="multi-select" data-preference="audioCodecs">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredAudioCodecsInput" name="preferredAudioCodecs" type="hidden">
+                  </div>
+                </div>
               </div>
             </div>
             <div class="settings-section">

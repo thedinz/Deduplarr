@@ -10,8 +10,36 @@ const state = {
   scanStartedAt: null,
   scanPollTimer: null,
   scanElapsedTimer: null,
-  activeDelete: null
+  activeDelete: null,
+  preferenceOptions: {
+    containers: [],
+    videoCodecs: [],
+    audioCodecs: []
+  },
+  preferenceSelections: {
+    containers: new Set(),
+    videoCodecs: new Set(),
+    audioCodecs: new Set()
+  }
 };
+
+const preferenceFields = [
+  {
+    key: "containers",
+    input: "preferredContainersInput",
+    format: (value) => `.${value}`
+  },
+  {
+    key: "videoCodecs",
+    input: "preferredVideoCodecsInput",
+    format: (value) => value.toUpperCase()
+  },
+  {
+    key: "audioCodecs",
+    input: "preferredAudioCodecsInput",
+    format: (value) => value.toUpperCase()
+  }
+];
 
 const elements = {
   loginShell: document.querySelector("#loginShell"),
@@ -142,6 +170,109 @@ function splitList(value) {
     .filter(Boolean);
 }
 
+function uniqueSorted(values) {
+  return [
+    ...new Set(
+      values
+        .map((value) => String(value || "").trim().replace(/^\./, "").toLowerCase())
+        .filter(Boolean)
+    )
+  ]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function preferenceFieldConfig(key) {
+  return preferenceFields.find((field) => field.key === key);
+}
+
+function preferenceControl(key) {
+  return document.querySelector(`.multi-select[data-preference="${key}"]`);
+}
+
+function setPreferenceSelection(key, values) {
+  state.preferenceSelections[key] = new Set(uniqueSorted(values));
+}
+
+function preferenceLabel(key, value) {
+  const field = preferenceFieldConfig(key);
+  return field?.format ? field.format(value) : value;
+}
+
+function preferenceValuesFromScan(scan) {
+  const options = {
+    containers: [],
+    videoCodecs: [],
+    audioCodecs: []
+  };
+
+  for (const group of scan?.groups || []) {
+    for (const file of group.files || []) {
+      options.containers.push(file.container, file.extension);
+      options.videoCodecs.push(file.videoCodec, file.video?.codec);
+      options.audioCodecs.push(
+        file.audioCodec,
+        ...(file.audioStreams || []).map((stream) => stream.codec)
+      );
+    }
+  }
+
+  return {
+    containers: uniqueSorted(options.containers),
+    videoCodecs: uniqueSorted(options.videoCodecs),
+    audioCodecs: uniqueSorted(options.audioCodecs)
+  };
+}
+
+function renderPreferenceControl(key) {
+  const control = preferenceControl(key);
+  const field = preferenceFieldConfig(key);
+  if (!control || !field) return;
+
+  const selected = state.preferenceSelections[key] || new Set();
+  const options = uniqueSorted([...(state.preferenceOptions[key] || []), ...selected]);
+  const trigger = control.querySelector(".multi-select-trigger");
+  const summary = control.querySelector(".multi-select-summary");
+  const menu = control.querySelector(".multi-select-menu");
+  const input = elements[field.input];
+  const selectedValues = [...selected];
+
+  input.value = selectedValues.join(", ");
+  summary.textContent = selectedValues.length
+    ? selectedValues.map((value) => preferenceLabel(key, value)).join(", ")
+    : options.length
+      ? "Any"
+      : "No scan values";
+  trigger.disabled = !options.length;
+  trigger.setAttribute("aria-expanded", control.classList.contains("open") ? "true" : "false");
+
+  menu.innerHTML = options.length
+    ? options
+        .map((option) => {
+          const checked = selected.has(option) ? "checked" : "";
+          return `
+            <label class="multi-select-option" role="option" aria-selected="${checked ? "true" : "false"}">
+              <input type="checkbox" value="${escapeHtml(option)}" ${checked}>
+              <span>${escapeHtml(preferenceLabel(key, option))}</span>
+            </label>
+          `;
+        })
+        .join("")
+    : `<div class="multi-select-empty">No scan values</div>`;
+}
+
+function renderPreferenceControls() {
+  preferenceFields.forEach((field) => renderPreferenceControl(field.key));
+  icons();
+}
+
+function closePreferenceControls(exceptControl = null) {
+  document.querySelectorAll(".multi-select.open").forEach((control) => {
+    if (control === exceptControl) return;
+    control.classList.remove("open");
+    control.querySelector(".multi-select-trigger")?.setAttribute("aria-expanded", "false");
+  });
+}
+
 function setBusy(button, busy, label) {
   button.disabled = busy;
   if (label) button.querySelector("span").textContent = label;
@@ -207,9 +338,10 @@ function renderConfig() {
   state.selectionMode = state.config.selectionMode || "manual";
   elements.reviewModeSelect.value = state.selectionMode;
   elements.selectionModeInput.value = state.selectionMode;
-  elements.preferredContainersInput.value = (state.config.keepPreferences?.containers || []).join(", ");
-  elements.preferredVideoCodecsInput.value = (state.config.keepPreferences?.videoCodecs || []).join(", ");
-  elements.preferredAudioCodecsInput.value = (state.config.keepPreferences?.audioCodecs || []).join(", ");
+  setPreferenceSelection("containers", state.config.keepPreferences?.containers || []);
+  setPreferenceSelection("videoCodecs", state.config.keepPreferences?.videoCodecs || []);
+  setPreferenceSelection("audioCodecs", state.config.keepPreferences?.audioCodecs || []);
+  renderPreferenceControls();
   elements.selectionStatus.textContent = state.selectionMode === "auto" ? "Auto" : "Manual";
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
   elements.authUsernameInput.value = state.config.auth?.username || "admin";
@@ -549,6 +681,8 @@ async function scan() {
     }
 
     state.scan = state.scanJob.result;
+    state.preferenceOptions = preferenceValuesFromScan(state.scan);
+    renderPreferenceControls();
     initializeGroupSelections();
     renderStats(state.scan.stats);
     renderGroups();
@@ -687,6 +821,38 @@ function setupNavigation() {
   });
 }
 
+function setupPreferenceControls() {
+  document.querySelectorAll(".multi-select").forEach((control) => {
+    const trigger = control.querySelector(".multi-select-trigger");
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const willOpen = !control.classList.contains("open");
+      closePreferenceControls(willOpen ? control : null);
+      control.classList.toggle("open", willOpen);
+      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    });
+
+    control.addEventListener("change", (event) => {
+      if (!event.target.matches("input[type='checkbox']")) return;
+      const key = control.dataset.preference;
+      setPreferenceSelection(
+        key,
+        [...control.querySelectorAll("input[type='checkbox']:checked")].map(
+          (input) => input.value
+        )
+      );
+      renderPreferenceControl(key);
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".multi-select")) closePreferenceControls();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePreferenceControls();
+  });
+}
+
 function setupEvents() {
   elements.loginForm.addEventListener("submit", login);
   elements.logoutButton.addEventListener("click", logout);
@@ -704,6 +870,7 @@ function setupEvents() {
 async function boot() {
   icons();
   setupNavigation();
+  setupPreferenceControls();
   setupEvents();
   renderStats();
   try {
