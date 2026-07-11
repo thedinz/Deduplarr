@@ -59,6 +59,7 @@ const elements = {
   scanButton: document.querySelector("#scanButton"),
   reviewModeSelect: document.querySelector("#reviewModeSelect"),
   autoSelectButton: document.querySelector("#autoSelectButton"),
+  deleteRejectedButton: document.querySelector("#deleteRejectedButton"),
   scanProgressPanel: document.querySelector("#scanProgressPanel"),
   scanProgressText: document.querySelector("#scanProgressText"),
   scanProgressMeta: document.querySelector("#scanProgressMeta"),
@@ -91,8 +92,10 @@ const elements = {
   authStatus: document.querySelector("#authStatus"),
   testButton: document.querySelector("#testButton"),
   deleteDialog: document.querySelector("#deleteDialog"),
+  deleteDialogTitle: document.querySelector("#deleteDialogTitle"),
   deleteFileName: document.querySelector("#deleteFileName"),
   deleteFilePath: document.querySelector("#deleteFilePath"),
+  deleteConfirmLabel: document.querySelector("#deleteConfirmLabel"),
   deleteConfirmInput: document.querySelector("#deleteConfirmInput"),
   confirmDeleteButton: document.querySelector("#confirmDeleteButton")
 };
@@ -507,7 +510,51 @@ function deleteButton(file, selectedFileId) {
   `;
 }
 
+function mediaTargetKey(file) {
+  if (!file?.ratingKey || !file?.mediaId) return "";
+  return `${file.ratingKey}:${file.mediaId}`;
+}
+
+function rejectedMediaTargets() {
+  if (state.selectionMode !== "auto") return [];
+
+  const targets = new Map();
+  for (const group of state.scan?.groups || []) {
+    const keeperId = state.groupSelections.get(group.id);
+    const keeper = group.files.find((file) => file.id === keeperId);
+    const keeperTarget = mediaTargetKey(keeper);
+    if (!keeper || !keeperTarget) continue;
+
+    for (const file of group.files) {
+      const target = mediaTargetKey(file);
+      if (!target || target === keeperTarget || file.id === keeperId) continue;
+
+      const existing = targets.get(target);
+      if (existing) existing.size += Number(file.size || 0);
+      else targets.set(target, { ...file, size: Number(file.size || 0) });
+    }
+  }
+
+  return [...targets.values()];
+}
+
+function updateBulkDeleteButton() {
+  const targets = rejectedMediaTargets();
+  const isAuto = state.selectionMode === "auto";
+  elements.deleteRejectedButton.classList.toggle("is-hidden", !isAuto);
+  elements.deleteRejectedButton.disabled = !state.config?.allowDeletes || !targets.length;
+  elements.deleteRejectedButton.querySelector("span").textContent = targets.length
+    ? `Delete ${targets.length} Rejected`
+    : "Delete Rejected";
+  elements.deleteRejectedButton.title = !state.config?.allowDeletes
+    ? "Deletes disabled in Settings"
+    : targets.length
+      ? `Delete ${targets.length} media versions not selected to keep`
+      : "No rejected media versions to delete";
+}
+
 function renderGroups() {
+  updateBulkDeleteButton();
   const query = elements.searchInput.value.trim().toLowerCase();
   const groups = (state.scan?.groups || []).filter((group) => {
     if (!query) return true;
@@ -602,10 +649,32 @@ function findFile(fileId) {
 function openDelete(fileId) {
   const file = findFile(fileId);
   if (!file) return;
-  state.activeDelete = file;
+  state.activeDelete = { mode: "single", targets: [file] };
+  elements.deleteDialogTitle.textContent = "Delete File";
   elements.deleteFileName.textContent = file.fileName || file.file;
   elements.deleteFilePath.textContent = file.file;
+  elements.deleteConfirmLabel.textContent = "Type DELETE to confirm";
+  elements.deleteConfirmInput.placeholder = "DELETE";
   elements.deleteConfirmInput.value = "";
+  elements.deleteConfirmInput.setCustomValidity("");
+  elements.deleteDialog.showModal();
+  elements.deleteConfirmInput.focus();
+}
+
+function openBulkDelete() {
+  const targets = rejectedMediaTargets();
+  if (!targets.length || !state.config?.allowDeletes) return;
+
+  state.activeDelete = { mode: "bulk", targets };
+  elements.deleteDialogTitle.textContent = "Delete Rejected Versions";
+  elements.deleteFileName.textContent = `${targets.length} media versions will be permanently deleted`;
+  elements.deleteFilePath.textContent = `${formatBytes(
+    targets.reduce((sum, file) => sum + Number(file.size || 0), 0)
+  )} across all scanned duplicate groups`;
+  elements.deleteConfirmLabel.textContent = "Type DELETE ALL to confirm";
+  elements.deleteConfirmInput.placeholder = "DELETE ALL";
+  elements.deleteConfirmInput.value = "";
+  elements.deleteConfirmInput.setCustomValidity("");
   elements.deleteDialog.showModal();
   elements.deleteConfirmInput.focus();
 }
@@ -790,22 +859,51 @@ async function deleteActiveFile(event) {
   event.preventDefault();
   if (!state.activeDelete) return;
 
+  const bulk = state.activeDelete.mode === "bulk";
+  const expectedConfirmation = bulk ? "DELETE ALL" : "DELETE";
+  if (elements.deleteConfirmInput.value !== expectedConfirmation) {
+    elements.deleteConfirmInput.setCustomValidity(`Type ${expectedConfirmation} to confirm.`);
+    elements.deleteConfirmInput.reportValidity();
+    return;
+  }
+  elements.deleteConfirmInput.setCustomValidity("");
+
   elements.confirmDeleteButton.disabled = true;
+  elements.deleteRejectedButton.disabled = true;
+  const failures = [];
+  let deleted = 0;
   try {
-    await api("/api/delete", {
-      method: "POST",
-      body: JSON.stringify({
-        ratingKey: state.activeDelete.ratingKey,
-        mediaId: state.activeDelete.mediaId,
-        confirmText: elements.deleteConfirmInput.value
-      })
-    });
+    for (const file of state.activeDelete.targets) {
+      try {
+        await api("/api/delete", {
+          method: "POST",
+          body: JSON.stringify({
+            ratingKey: file.ratingKey,
+            mediaId: file.mediaId,
+            confirmText: "DELETE"
+          })
+        });
+        deleted += 1;
+      } catch (error) {
+        failures.push({ file, error });
+        if (!bulk) throw error;
+      }
+    }
     elements.deleteDialog.close();
     await scan();
+    if (bulk && failures.length) {
+      setMessage(
+        `Deleted ${deleted} media versions; ${failures.length} failed. First error: ${failures[0].error.message}`,
+        "error"
+      );
+    } else if (bulk) {
+      setMessage(`Deleted ${deleted} rejected media versions.`, "success");
+    }
   } catch (error) {
     setMessage(error.message, "error");
   } finally {
     elements.confirmDeleteButton.disabled = false;
+    updateBulkDeleteButton();
   }
 }
 
@@ -861,6 +959,7 @@ function setupEvents() {
   elements.scanButton.addEventListener("click", scan);
   elements.reviewModeSelect.addEventListener("change", () => setReviewMode(elements.reviewModeSelect.value));
   elements.autoSelectButton.addEventListener("click", autoSelectSuggested);
+  elements.deleteRejectedButton.addEventListener("click", openBulkDelete);
   elements.searchInput.addEventListener("input", renderGroups);
   elements.selectionModeInput.addEventListener("change", () => setReviewMode(elements.selectionModeInput.value));
   elements.settingsForm.addEventListener("submit", saveSettings);
