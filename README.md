@@ -23,7 +23,7 @@ services:
       PORT: "7889"
       CONFIG_DIR: /config
     volumes:
-      - ${DEDUPLARR_APPDATA:-./appdata}:/config
+      - ./config:/config
     restart: unless-stopped
 ```
 
@@ -35,15 +35,14 @@ Open `http://localhost:7889`, sign in with `admin/admin`, then add your Plex URL
 
 ## Persistent Settings
 
-Settings are written atomically to `config.json` in the app-data directory. The Compose file mounts `./appdata` on the host to `/config` in the container, so pulling a new image or recreating the container does not reset Plex credentials, preferences, authentication, or delete settings.
+Settings are written atomically to `/config/config.json`. The Compose file mounts `./config` on the host to `/config` in the container, so pulling a new image or recreating the container does not reset Plex credentials, preferences, authentication, or delete settings.
 
-Set `DEDUPLARR_APPDATA` when app data lives elsewhere, for example:
+On Unraid, map its appdata directory to the same container path:
 
-```bash
-DEDUPLARR_APPDATA=/mnt/user/appdata/deduplarr docker compose up -d
+```yaml
+volumes:
+  - /mnt/user/appdata/deduplarr:/config
 ```
-
-Existing installations using `./config:/config` remain supported. Keep that mount unchanged, or move the contents of `./config` into `./appdata` before adopting the updated Compose default.
 
 ## Authentication
 
@@ -64,7 +63,6 @@ Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so 
 | --- | --- | --- |
 | `PORT` | `7889` | HTTP port inside the container |
 | `CONFIG_DIR` | `/config` in Docker | Container directory containing persistent `config.json` |
-| `DEDUPLARR_APPDATA` | `./appdata` in Compose | Host directory mounted to `/config` |
 | `SESSION_SECRET` | generated | Optional stable session signing secret |
 
 ## Development

@@ -10,7 +10,7 @@ services:
       # Optional: persist browser sessions across container restarts.
       # SESSION_SECRET: change-me-to-a-long-random-string
     volumes:
-      - ${DEDUPLARR_APPDATA:-./appdata}:/config
+      - ./config:/config
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7889/api/health"]
       interval: 30s
