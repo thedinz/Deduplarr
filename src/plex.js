@@ -438,11 +438,15 @@ export class PlexClient {
     };
   }
 
-  async deletePart(partKey) {
-    if (!partKey || !partKey.startsWith("/library/parts/")) {
-      throw new Error("A Plex media part key is required for file-level deletion.");
+  async deleteMedia(ratingKey, mediaId) {
+    const metadataId = text(ratingKey).trim();
+    const versionId = text(mediaId).trim();
+    if (!metadataId || !versionId) {
+      throw new Error("A Plex metadata key and media ID are required for version deletion.");
     }
-    await this.request(partKey, {}, { method: "DELETE" });
-    return { deleted: true, target: partKey };
+
+    const target = `/library/metadata/${encodeURIComponent(metadataId)}/media/${encodeURIComponent(versionId)}`;
+    await this.request(target, {}, { method: "DELETE" });
+    return { deleted: true, target };
   }
 }

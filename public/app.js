@@ -795,7 +795,8 @@ async function deleteActiveFile(event) {
     await api("/api/delete", {
       method: "POST",
       body: JSON.stringify({
-        partKey: state.activeDelete.partKey,
+        ratingKey: state.activeDelete.ratingKey,
+        mediaId: state.activeDelete.mediaId,
         confirmText: elements.deleteConfirmInput.value
       })
     });
