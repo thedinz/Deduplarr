@@ -318,7 +318,12 @@ app.post(
     }
 
     const client = new PlexClient(config);
-    response.json(await client.deletePart(String(request.body?.partKey || "")));
+    response.json(
+      await client.deleteMedia(
+        String(request.body?.ratingKey || ""),
+        String(request.body?.mediaId || "")
+      )
+    );
   })
 );
 

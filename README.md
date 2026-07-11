@@ -6,7 +6,7 @@ Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an int
 
 The first version is intentionally API-only. Plex already knows each library item, media version, media part, file path, video stream, audio stream, subtitle stream, and duplicate grouping, so Deduplarr does not need direct filesystem mounts for scanning or scoring.
 
-Deletion is different: Deduplarr asks Plex to delete the selected media part. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
+Deletion is different: Deduplarr asks Plex to delete the selected media version. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
 
 ## Docker Compose
 
