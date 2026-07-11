@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const CONFIG_DIR = process.env.CONFIG_DIR || path.resolve(process.cwd(), "config");
@@ -136,7 +136,16 @@ export async function saveConfig(input, options = {}) {
   };
 
   await mkdir(CONFIG_DIR, { recursive: true });
-  await writeFile(CONFIG_FILE, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  const temporaryFile = `${CONFIG_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    await rename(temporaryFile, CONFIG_FILE);
+  } finally {
+    await rm(temporaryFile, { force: true });
+  }
   return next;
 }
 

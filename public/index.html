@@ -83,6 +83,10 @@
                 <i data-lucide="check-check"></i>
                 <span>Auto Select</span>
               </button>
+              <button id="deleteRejectedButton" class="danger-button is-hidden" type="button">
+                <i data-lucide="trash-2"></i>
+                <span>Delete Rejected</span>
+              </button>
               <label class="search-field">
                 <i data-lucide="search"></i>
                 <input id="searchInput" type="search" placeholder="Filter">
@@ -257,7 +261,7 @@
     <dialog id="deleteDialog" class="delete-dialog">
       <form method="dialog">
         <header>
-          <h2>Delete File</h2>
+          <h2 id="deleteDialogTitle">Delete File</h2>
           <button class="icon-button ghost" value="cancel" title="Close">
             <i data-lucide="x"></i>
           </button>
@@ -265,7 +269,7 @@
         <p id="deleteFileName" class="delete-file-name"></p>
         <code id="deleteFilePath"></code>
         <label>
-          <span>Confirm</span>
+          <span id="deleteConfirmLabel">Type DELETE to confirm</span>
           <input id="deleteConfirmInput" autocomplete="off" placeholder="DELETE">
         </label>
         <menu>

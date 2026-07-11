@@ -6,7 +6,7 @@ Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an int
 
 The first version is intentionally API-only. Plex already knows each library item, media version, media part, file path, video stream, audio stream, subtitle stream, and duplicate grouping, so Deduplarr does not need direct filesystem mounts for scanning or scoring.
 
-Deletion is different: Deduplarr asks Plex to delete the selected media version. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
+Deletion is different: Deduplarr asks Plex to delete the selected media version. Auto mode can delete every rejected version across the scan in one guarded action. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
 
 ## Docker Compose
 
@@ -23,7 +23,7 @@ services:
       PORT: "7889"
       CONFIG_DIR: /config
     volumes:
-      - ./config:/config
+      - ${DEDUPLARR_APPDATA:-./appdata}:/config
     restart: unless-stopped
 ```
 
@@ -32,6 +32,18 @@ docker compose up -d
 ```
 
 Open `http://localhost:7889`, sign in with `admin/admin`, then add your Plex URL and token in Settings.
+
+## Persistent Settings
+
+Settings are written atomically to `config.json` in the app-data directory. The Compose file mounts `./appdata` on the host to `/config` in the container, so pulling a new image or recreating the container does not reset Plex credentials, preferences, authentication, or delete settings.
+
+Set `DEDUPLARR_APPDATA` when app data lives elsewhere, for example:
+
+```bash
+DEDUPLARR_APPDATA=/mnt/user/appdata/deduplarr docker compose up -d
+```
+
+Existing installations using `./config:/config` remain supported. Keep that mount unchanged, or move the contents of `./config` into `./appdata` before adopting the updated Compose default.
 
 ## Authentication
 
@@ -51,7 +63,8 @@ Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `7889` | HTTP port inside the container |
-| `CONFIG_DIR` | `/config` in Docker | Stores local app config |
+| `CONFIG_DIR` | `/config` in Docker | Container directory containing persistent `config.json` |
+| `DEDUPLARR_APPDATA` | `./appdata` in Compose | Host directory mounted to `/config` |
 | `SESSION_SECRET` | generated | Optional stable session signing secret |
 
 ## Development
