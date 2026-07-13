@@ -375,6 +375,19 @@ button {
   gap: 12px;
 }
 
+.list-more-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .duplicate-group {
   border: 1px solid var(--line);
   border-radius: 3px;

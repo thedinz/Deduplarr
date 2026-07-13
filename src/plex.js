@@ -151,13 +151,11 @@ function subtitlePreferenceMatches(record, preferences = {}) {
   const languageValues = [
     record.languageCode,
     record.language,
-    record.raw?.languageCode,
-    record.raw?.languageTag,
-    record.raw?.language
+    record.languageTag
   ]
     .map((value) => text(value).trim().toLowerCase())
     .filter(Boolean);
-  const formatValues = [record.extension, record.codec, record.raw?.codec, record.raw?.format]
+  const formatValues = [record.extension, record.codec, record.format]
     .map((value) => text(value).trim().replace(/^\./, "").toLowerCase())
     .filter(Boolean);
   const flagValues = subtitleFlagValues(record);
@@ -414,8 +412,10 @@ function flattenSidecarSubtitles(item, library, subtitlePreferences = {}) {
           displayTitle: text(stream.displayTitle || stream.extendedDisplayTitle || stream.title),
           language: subtitleLanguageLabel(stream),
           languageCode: normalizeLanguageCode(stream),
+          languageTag: text(stream.languageTag || ""),
           extension,
           codec: cleanExtension(stream.codec || stream.format || extension, extension),
+          format: cleanExtension(stream.format || stream.codec || extension, extension),
           source: subtitleSource(stream),
           sidecarPath: text(stream.file || stream.path || stream.location),
           forced: booleanValue(stream.forced),
@@ -423,8 +423,7 @@ function flattenSidecarSubtitles(item, library, subtitlePreferences = {}) {
           default: booleanValue(stream.default),
           selected: booleanValue(stream.selected),
           canAutoSync: booleanValue(stream.canAutoSync),
-          index: number(stream.index, streamIndex),
-          raw: stream
+          index: number(stream.index, streamIndex)
         };
 
         record.score = subtitleScore(record, subtitlePreferences);

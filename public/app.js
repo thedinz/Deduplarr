@@ -1,3 +1,5 @@
+const SUBTITLE_GROUP_RENDER_BATCH = 75;
+
 const state = {
   config: null,
   session: null,
@@ -16,6 +18,7 @@ const state = {
   subtitleScanStartedAt: null,
   subtitleScanPollTimer: null,
   subtitleScanElapsedTimer: null,
+  subtitleRenderLimit: SUBTITLE_GROUP_RENDER_BATCH,
   activeDelete: null,
   preferenceOptions: {
     containers: [],
@@ -597,11 +600,21 @@ function autoSelectSuggested() {
 }
 
 function autoSelectSuggestedSubtitles() {
+  let selected = 0;
   for (const group of state.subtitleScan?.groups || []) {
     const suggested = group.suggestedSubtitleId;
-    if (suggested) state.subtitleGroupSelections.set(group.id, suggested);
+    if (suggested) {
+      state.subtitleGroupSelections.set(group.id, suggested);
+      selected += 1;
+    }
   }
   renderSubtitleGroups();
+  setSubtitleMessage(
+    selected
+      ? `Selected suggested keepers for ${selected} subtitle groups.`
+      : "No subtitle suggestions to select.",
+    selected ? "success" : ""
+  );
 }
 
 function setReviewMode(mode) {
@@ -898,7 +911,10 @@ function renderSubtitleGroups() {
     return;
   }
 
-  elements.subtitlesList.innerHTML = groups
+  const visibleGroups = groups.slice(0, state.subtitleRenderLimit);
+  const hiddenCount = Math.max(groups.length - visibleGroups.length, 0);
+
+  elements.subtitlesList.innerHTML = visibleGroups
     .map((group) => {
       const selectedSubtitleId = state.subtitleGroupSelections.get(group.id) || "";
       const rows = (group.subtitles || [])
@@ -951,7 +967,18 @@ function renderSubtitleGroups() {
         </article>
       `;
     })
-    .join("");
+    .join("") +
+    (hiddenCount
+      ? `
+        <div class="list-more-panel">
+          <span>Showing ${visibleGroups.length} of ${groups.length} subtitle groups</span>
+          <button id="loadMoreSubtitlesButton" class="secondary-button" type="button">
+            <i data-lucide="list-plus"></i>
+            <span>Show More</span>
+          </button>
+        </div>
+      `
+      : "");
 
   elements.subtitlesList.querySelectorAll(".keep-subtitle-button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -961,6 +988,10 @@ function renderSubtitleGroups() {
   });
   elements.subtitlesList.querySelectorAll(".delete-subtitle-button").forEach((button) => {
     button.addEventListener("click", () => openSubtitleDelete(button.dataset.subtitleId));
+  });
+  elements.subtitlesList.querySelector("#loadMoreSubtitlesButton")?.addEventListener("click", () => {
+    state.subtitleRenderLimit += SUBTITLE_GROUP_RENDER_BATCH;
+    renderSubtitleGroups();
   });
   icons();
 }
@@ -1177,6 +1208,7 @@ async function subtitleScan() {
     }
 
     state.subtitleScan = state.subtitleScanJob.result;
+    state.subtitleRenderLimit = SUBTITLE_GROUP_RENDER_BATCH;
     state.preferenceOptions = {
       ...state.preferenceOptions,
       ...preferenceValuesFromSubtitleScan(state.subtitleScan)
@@ -1417,7 +1449,10 @@ function setupEvents() {
   elements.deleteRejectedButton.addEventListener("click", openBulkDelete);
   elements.deleteRejectedSubtitlesButton.addEventListener("click", openBulkSubtitleDelete);
   elements.searchInput.addEventListener("input", renderGroups);
-  elements.subtitleSearchInput.addEventListener("input", renderSubtitleGroups);
+  elements.subtitleSearchInput.addEventListener("input", () => {
+    state.subtitleRenderLimit = SUBTITLE_GROUP_RENDER_BATCH;
+    renderSubtitleGroups();
+  });
   elements.selectionModeInput.addEventListener("change", () => setReviewMode(elements.selectionModeInput.value));
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);

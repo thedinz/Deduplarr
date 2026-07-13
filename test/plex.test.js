@@ -187,6 +187,7 @@ test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams",
     result.groups[0].subtitles.map((subtitle) => subtitle.streamId),
     ["101", "102"]
   );
+  assert.equal(result.groups[0].subtitles.some((subtitle) => "raw" in subtitle), false);
   assert.equal(result.stats.subtitleStreams, 4);
   assert.equal(result.stats.sidecars, 2);
   assert.equal(result.stats.duplicateSidecars, 1);
