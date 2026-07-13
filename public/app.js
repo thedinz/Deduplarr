@@ -2,6 +2,7 @@ const SUBTITLE_GROUP_RENDER_BATCH = 75;
 const DELETE_CONCURRENCY = 4;
 const DELETE_FAILURE_SAMPLE_LIMIT = 8;
 const DELETE_PROGRESS_UPDATE_MS = 120;
+const DELETE_TRANSPORT_RETRIES = 2;
 
 const state = {
   config: null,
@@ -179,14 +180,29 @@ function icons() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+  } catch (cause) {
+    const error = new Error(
+      `${cause.message || "Request failed"} before Deduplarr returned a response. The request may have been interrupted by a reload, server restart, reverse proxy timeout, or local network drop.`
+    );
+    error.name = cause.name || error.name;
+    error.cause = cause;
+    error.details = {
+      requestPath: path,
+      requestMethod: options.method || "GET",
+      transportFailure: true
+    };
+    throw error;
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401 && !["/api/session", "/api/login"].includes(path)) {
@@ -1513,16 +1529,23 @@ function deleteTargetPath(target, kind) {
   return target.file || "";
 }
 
+function isTransportDeleteFailure(error) {
+  return Boolean(error.details?.transportFailure);
+}
+
 function deleteFailureMessage(error) {
   const details = error.details || {};
   const status = details.plexStatus || error.status || "";
   const body = details.plexBody || "";
-  const target = details.target || "";
+  const target = details.target || details.requestPath || "";
+  const retryText = details.retryCount ? `retried ${details.retryCount}x` : "";
   const parts = [
     status ? `HTTP ${status}` : "",
     details.plexStatusText,
     body,
     !body ? error.message : "",
+    details.transportFailure ? "No server response was received" : "",
+    retryText,
     target ? `target ${target}` : ""
   ].filter(Boolean);
   return parts.join(" | ") || error.message || "Delete failed";
@@ -1541,6 +1564,49 @@ function waitForPaint() {
     if (window.requestAnimationFrame) window.requestAnimationFrame(() => resolve());
     else setTimeout(resolve, 0);
   });
+}
+
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+
+    const timeout = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+      },
+      { once: true }
+    );
+  });
+}
+
+async function deleteTargetWithRetry(target, kind, signal) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= DELETE_TRANSPORT_RETRIES; attempt += 1) {
+    try {
+      return await deleteTarget(target, kind, signal);
+    } catch (error) {
+      lastError = error;
+      const canRetry =
+        isTransportDeleteFailure(error) &&
+        !state.deleteCancelRequested &&
+        !signal?.aborted &&
+        attempt < DELETE_TRANSPORT_RETRIES;
+      if (!canRetry) break;
+      await delay(300 * (attempt + 1), signal);
+    }
+  }
+
+  if (lastError?.details) {
+    lastError.details.retryCount = DELETE_TRANSPORT_RETRIES;
+  }
+  throw lastError;
 }
 
 async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
@@ -1575,7 +1641,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
       cursor += 1;
 
       try {
-        await deleteTarget(target, kind, signal);
+        await deleteTargetWithRetry(target, kind, signal);
         deletedTargets.push(target);
       } catch (error) {
         if (!(state.deleteCancelRequested && error.name === "AbortError")) {
