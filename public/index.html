@@ -377,6 +377,15 @@
           <span id="deleteConfirmLabel">Type DELETE to confirm</span>
           <input id="deleteConfirmInput" autocomplete="off" placeholder="DELETE">
         </label>
+        <div id="deleteProgressPanel" class="scan-progress-panel delete-progress-panel is-hidden" role="status" aria-live="polite">
+          <div class="scan-progress-header">
+            <span id="deleteProgressText">Queued</span>
+            <span id="deleteProgressMeta">0 / 0</span>
+          </div>
+          <div class="scan-progress-track" aria-hidden="true">
+            <div id="deleteProgressFill" class="scan-progress-fill"></div>
+          </div>
+        </div>
         <menu>
           <button class="secondary-button" value="cancel">Cancel</button>
           <button id="confirmDeleteButton" class="danger-button" value="default">

@@ -1,4 +1,6 @@
 const SUBTITLE_GROUP_RENDER_BATCH = 75;
+const DELETE_CONCURRENCY = 4;
+const DELETE_PROGRESS_UPDATE_MS = 120;
 
 const state = {
   config: null,
@@ -20,6 +22,7 @@ const state = {
   subtitleScanElapsedTimer: null,
   subtitleRenderLimit: SUBTITLE_GROUP_RENDER_BATCH,
   activeDelete: null,
+  deleteInProgress: false,
   preferenceOptions: {
     containers: [],
     videoCodecs: [],
@@ -154,7 +157,12 @@ const elements = {
   deleteFilePath: document.querySelector("#deleteFilePath"),
   deleteConfirmLabel: document.querySelector("#deleteConfirmLabel"),
   deleteConfirmInput: document.querySelector("#deleteConfirmInput"),
-  confirmDeleteButton: document.querySelector("#confirmDeleteButton")
+  deleteProgressPanel: document.querySelector("#deleteProgressPanel"),
+  deleteProgressText: document.querySelector("#deleteProgressText"),
+  deleteProgressMeta: document.querySelector("#deleteProgressMeta"),
+  deleteProgressFill: document.querySelector("#deleteProgressFill"),
+  confirmDeleteButton: document.querySelector("#confirmDeleteButton"),
+  deleteCancelButtons: document.querySelectorAll("#deleteDialog button[value='cancel']")
 };
 
 function icons() {
@@ -384,6 +392,10 @@ function formatElapsed(ms) {
   return `${minutes}:${seconds}`;
 }
 
+function formatInteger(value) {
+  return Number(value || 0).toLocaleString();
+}
+
 function renderScanProgress(job, startedAt = state.scanStartedAt) {
   const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
   const elapsed = startedAt ? Date.now() - startedAt : 0;
@@ -400,6 +412,43 @@ function renderSubtitleScanProgress(job, startedAt = state.subtitleScanStartedAt
   elements.subtitleScanProgressText.textContent = job?.message || "Scanning";
   elements.subtitleScanProgressMeta.textContent = `${Math.round(progress)}% | ${formatElapsed(elapsed)}`;
   elements.subtitleScanProgressFill.style.width = `${progress}%`;
+}
+
+function renderDeleteProgress({ completed = 0, total = 0, failures = 0, message = "Deleting" }) {
+  const progress = total ? Math.max(0, Math.min(100, (completed / total) * 100)) : 0;
+  const failureText = failures ? ` | ${formatInteger(failures)} failed` : "";
+  elements.deleteProgressPanel.classList.remove("is-hidden");
+  elements.deleteProgressText.textContent = message;
+  elements.deleteProgressMeta.textContent = `${formatInteger(completed)} / ${formatInteger(total)}${failureText}`;
+  elements.deleteProgressFill.style.width = `${progress}%`;
+}
+
+function resetDeleteProgress() {
+  elements.deleteProgressPanel.classList.add("is-hidden");
+  elements.deleteProgressText.textContent = "Queued";
+  elements.deleteProgressMeta.textContent = "0 / 0";
+  elements.deleteProgressFill.style.width = "0%";
+}
+
+function setDeleteDialogBusy(busy) {
+  state.deleteInProgress = busy;
+  elements.confirmDeleteButton.disabled = busy;
+  elements.deleteConfirmInput.disabled = busy;
+  elements.deleteRejectedButton.disabled = busy;
+  elements.deleteRejectedSubtitlesButton.disabled = busy;
+  elements.deleteCancelButtons.forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+function prepareDeleteDialog() {
+  state.deleteInProgress = false;
+  elements.confirmDeleteButton.disabled = false;
+  elements.deleteConfirmInput.disabled = false;
+  elements.deleteCancelButtons.forEach((button) => {
+    button.disabled = false;
+  });
+  resetDeleteProgress();
 }
 
 function clearScanTimers() {
@@ -1030,6 +1079,7 @@ function openDelete(fileId) {
   const file = findFile(fileId);
   if (!file) return;
   state.activeDelete = { kind: "media", mode: "single", targets: [file] };
+  prepareDeleteDialog();
   elements.deleteDialogTitle.textContent = "Delete File";
   elements.deleteFileName.textContent = file.fileName || file.file;
   elements.deleteFilePath.textContent = file.file;
@@ -1046,6 +1096,7 @@ function openBulkDelete() {
   if (!targets.length || !state.config?.allowDeletes) return;
 
   state.activeDelete = { kind: "media", mode: "bulk", targets };
+  prepareDeleteDialog();
   elements.deleteDialogTitle.textContent = "Delete Rejected Versions";
   elements.deleteFileName.textContent = `${targets.length} media versions will be permanently deleted`;
   elements.deleteFilePath.textContent = `${formatBytes(
@@ -1063,6 +1114,7 @@ function openSubtitleDelete(subtitleId) {
   const subtitle = findSubtitle(subtitleId);
   if (!subtitle) return;
   state.activeDelete = { kind: "subtitle", mode: "single", targets: [subtitle] };
+  prepareDeleteDialog();
   elements.deleteDialogTitle.textContent = "Delete Subtitle";
   elements.deleteFileName.textContent = subtitle.displayTitle || subtitle.streamTitle || "Subtitle sidecar";
   elements.deleteFilePath.textContent = subtitle.sidecarPath || subtitle.streamKey || subtitle.partFile;
@@ -1079,6 +1131,7 @@ function openBulkSubtitleDelete() {
   if (!targets.length || !state.config?.allowDeletes) return;
 
   state.activeDelete = { kind: "subtitle", mode: "bulk", targets };
+  prepareDeleteDialog();
   elements.deleteDialogTitle.textContent = "Delete Rejected Subtitles";
   elements.deleteFileName.textContent = `${targets.length} subtitle sidecars will be permanently deleted`;
   elements.deleteFilePath.textContent = `${new Set(targets.map((subtitle) => subtitle.partFile)).size} media files across scanned subtitle cleanup groups`;
@@ -1334,56 +1387,170 @@ async function logout() {
   showLogin({ authMode: state.config?.auth?.mode || "builtin" });
 }
 
+function deleteTarget(target, kind) {
+  if (kind === "subtitle") {
+    return api("/api/subtitle-delete", {
+      method: "POST",
+      body: JSON.stringify({
+        streamId: target.streamId,
+        extension: target.extension,
+        confirmText: "DELETE"
+      })
+    });
+  }
+
+  return api("/api/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      ratingKey: target.ratingKey,
+      mediaId: target.mediaId,
+      confirmText: "DELETE"
+    })
+  });
+}
+
+function deleteTargetLabel(kind) {
+  return kind === "subtitle" ? "subtitle sidecars" : "media versions";
+}
+
+function waitForPaint() {
+  return new Promise((resolve) => {
+    if (window.requestAnimationFrame) window.requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
+async function deleteTargetsWithProgress(targets, kind, bulk) {
+  const failures = [];
+  const deletedTargets = [];
+  const total = targets.length;
+  let cursor = 0;
+  let completed = 0;
+  let lastProgressUpdate = 0;
+
+  const paint = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressUpdate < DELETE_PROGRESS_UPDATE_MS && completed < total) return;
+    lastProgressUpdate = now;
+    renderDeleteProgress({
+      completed,
+      total,
+      failures: failures.length,
+      message: `Deleting ${deleteTargetLabel(kind)}`
+    });
+  };
+
+  paint(true);
+  await waitForPaint();
+
+  async function worker() {
+    while (cursor < total) {
+      const target = targets[cursor];
+      cursor += 1;
+
+      try {
+        await deleteTarget(target, kind);
+        deletedTargets.push(target);
+      } catch (error) {
+        failures.push({ target, error });
+        if (!bulk) throw error;
+      } finally {
+        completed += 1;
+        paint();
+      }
+    }
+  }
+
+  const workerCount = bulk ? Math.min(DELETE_CONCURRENCY, total) : 1;
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  renderDeleteProgress({
+    completed,
+    total,
+    failures: failures.length,
+    message: failures.length ? "Delete finished with failures" : "Delete complete"
+  });
+
+  return { deleted: deletedTargets.length, deletedTargets, failures };
+}
+
+function subtitleStatsFromGroups(groups, previousStats = {}) {
+  return {
+    ...previousStats,
+    groups: groups.length,
+    sidecars: groups.reduce((sum, group) => sum + (group.subtitles?.length || 0), 0)
+  };
+}
+
+function removeDeletedSubtitleTargets(deletedTargets) {
+  if (!state.subtitleScan || !deletedTargets.length) return;
+
+  const deletedKeys = new Set(deletedTargets.map((target) => subtitleTargetKey(target)).filter(Boolean));
+  const groups = [];
+
+  for (const group of state.subtitleScan.groups || []) {
+    const subtitles = (group.subtitles || []).filter(
+      (subtitle) => !deletedKeys.has(subtitleTargetKey(subtitle))
+    );
+
+    if (!subtitles.length || (!group.deleteAll && subtitles.length < 2)) {
+      state.subtitleGroupSelections.delete(group.id);
+      continue;
+    }
+
+    const selectedSubtitleId = state.subtitleGroupSelections.get(group.id);
+    if (selectedSubtitleId && !subtitles.some((subtitle) => subtitle.id === selectedSubtitleId)) {
+      state.subtitleGroupSelections.delete(group.id);
+    }
+
+    const suggestedStillExists = subtitles.some(
+      (subtitle) => subtitle.id === group.suggestedSubtitleId
+    );
+    groups.push({
+      ...group,
+      subtitles,
+      suggestedSubtitleId: suggestedStillExists
+        ? group.suggestedSubtitleId
+        : group.deleteAll
+          ? ""
+          : subtitles[0]?.id || ""
+    });
+  }
+
+  state.subtitleScan = {
+    ...state.subtitleScan,
+    groups,
+    stats: subtitleStatsFromGroups(groups, state.subtitleScan.stats)
+  };
+}
+
 async function deleteActiveFile(event) {
   event.preventDefault();
   if (!state.activeDelete) return;
 
   const bulk = state.activeDelete.mode === "bulk";
   const kind = state.activeDelete.kind || "media";
+  const targets = state.activeDelete.targets || [];
   const expectedConfirmation = bulk ? "DELETE ALL" : "DELETE";
   if (elements.deleteConfirmInput.value !== expectedConfirmation) {
     elements.deleteConfirmInput.setCustomValidity(`Type ${expectedConfirmation} to confirm.`);
     elements.deleteConfirmInput.reportValidity();
     return;
   }
+  if (!targets.length) return;
   elements.deleteConfirmInput.setCustomValidity("");
 
-  elements.confirmDeleteButton.disabled = true;
-  elements.deleteRejectedButton.disabled = true;
-  elements.deleteRejectedSubtitlesButton.disabled = true;
-  const failures = [];
-  let deleted = 0;
+  setDeleteDialogBusy(true);
   try {
-    for (const target of state.activeDelete.targets) {
-      try {
-        if (kind === "subtitle") {
-          await api("/api/subtitle-delete", {
-            method: "POST",
-            body: JSON.stringify({
-              streamId: target.streamId,
-              extension: target.extension,
-              confirmText: "DELETE"
-            })
-          });
-        } else {
-          await api("/api/delete", {
-            method: "POST",
-            body: JSON.stringify({
-              ratingKey: target.ratingKey,
-              mediaId: target.mediaId,
-              confirmText: "DELETE"
-            })
-          });
-        }
-        deleted += 1;
-      } catch (error) {
-        failures.push({ target, error });
-        if (!bulk) throw error;
-      }
-    }
+    const { deleted, deletedTargets, failures } = await deleteTargetsWithProgress(targets, kind, bulk);
     elements.deleteDialog.close();
-    if (kind === "subtitle") await subtitleScan();
-    else await scan();
+
+    if (kind === "subtitle") {
+      removeDeletedSubtitleTargets(deletedTargets);
+      renderSubtitleGroups();
+    } else {
+      await scan();
+    }
+
     if (bulk && failures.length) {
       const message = `Deleted ${deleted} ${kind === "subtitle" ? "subtitle sidecars" : "media versions"}; ${failures.length} failed. First error: ${failures[0].error.message}`;
       if (kind === "subtitle") setSubtitleMessage(message, "error");
@@ -1397,7 +1564,8 @@ async function deleteActiveFile(event) {
     if (kind === "subtitle") setSubtitleMessage(error.message, "error");
     else setMessage(error.message, "error");
   } finally {
-    elements.confirmDeleteButton.disabled = false;
+    setDeleteDialogBusy(false);
+    if (!elements.deleteDialog.open) state.activeDelete = null;
     updateBulkDeleteButton();
     updateBulkSubtitleDeleteButton();
   }
@@ -1471,6 +1639,14 @@ function setupEvents() {
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);
   elements.confirmDeleteButton.addEventListener("click", deleteActiveFile);
+  elements.deleteDialog.addEventListener("cancel", (event) => {
+    if (state.deleteInProgress) event.preventDefault();
+  });
+  elements.deleteDialog.addEventListener("close", () => {
+    if (state.deleteInProgress) return;
+    state.activeDelete = null;
+    resetDeleteProgress();
+  });
 }
 
 async function boot() {

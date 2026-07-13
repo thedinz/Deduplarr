@@ -269,6 +269,14 @@ button {
   transition: width 180ms ease;
 }
 
+.delete-progress-panel {
+  margin-bottom: 0;
+}
+
+.delete-progress-panel .scan-progress-fill {
+  background: var(--danger);
+}
+
 .library-strip {
   display: flex;
   flex-wrap: wrap;
