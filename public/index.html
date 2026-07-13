@@ -47,6 +47,10 @@
             <i data-lucide="captions"></i>
             <span>Subtitle Files</span>
           </button>
+          <button class="nav-item" data-view="instructions">
+            <i data-lucide="book-open"></i>
+            <span>Instructions</span>
+          </button>
           <button class="nav-item" data-view="settings">
             <i data-lucide="settings"></i>
             <span>Settings</span>
@@ -189,6 +193,80 @@
 
           <div id="subtitleMessageArea" class="message-area"></div>
           <div id="subtitlesList" class="duplicates-list"></div>
+        </section>
+
+        <section id="instructionsView" class="view">
+          <div class="instructions-panel">
+            <section class="instructions-section first-section">
+              <div class="section-heading">
+                <h2>Before You Scan</h2>
+                <span class="section-status">Plex is the source of truth</span>
+              </div>
+              <p>Deduplarr reads Plex's database through the Plex API. It does not inspect mounted media folders directly, so scan results are only as current as Plex's most recent library scan and file analysis.</p>
+              <ul class="instruction-list">
+                <li>Finish downloads, imports, upgrades, and post-processing before running Deduplarr.</li>
+                <li>Run a Plex library scan for the affected libraries right before running Deduplarr.</li>
+                <li>Wait for Plex to finish scanning and analyzing changed files before trusting codec, bitrate, resolution, size, or subtitle stream details.</li>
+              </ul>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Recommended Flow</h2>
+                <span class="section-status">Safe order</span>
+              </div>
+              <ol class="instruction-steps">
+                <li>Let Radarr, Sonarr, download clients, Tdarr, and any other file processors finish their work.</li>
+                <li>Run a Plex scan for the specific libraries or folders that changed.</li>
+                <li>Confirm Plex now shows the expected file versions, paths, sizes, codecs, and subtitle sidecars.</li>
+                <li>Run the Media Files or Subtitle Files scan in Deduplarr.</li>
+                <li>Review keep preferences, suggested keepers, and file paths before deleting.</li>
+                <li>Use bulk delete only after the scan reflects the current Plex state.</li>
+              </ol>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Stale Results</h2>
+                <span class="section-status">Common causes</span>
+              </div>
+              <ul class="instruction-list">
+                <li>Plex is set to scan periodically, such as once per day, and Deduplarr runs before that scan happens.</li>
+                <li>Automatic Plex change detection is disabled or unreliable on network, remote, or FUSE-style mounts.</li>
+                <li>An upgrade replaced a file in place, but Plex has not re-read the changed file metadata yet.</li>
+                <li>Tdarr or another processor changed the file after Plex first detected it.</li>
+                <li>External subtitle files were added, removed, or renamed after Plex last scanned the folder.</li>
+              </ul>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Cleanup Limits</h2>
+                <span class="section-status">What Plex can delete</span>
+              </div>
+              <ul class="instruction-list">
+                <li>Media deletion removes whole Plex media versions, not individual tracks inside a file.</li>
+                <li>Subtitle cleanup targets external sidecar subtitle files only.</li>
+                <li>Embedded and burned-in subtitles are ignored because Plex cannot delete them as standalone sidecars.</li>
+                <li>Plex must have delete permission and filesystem write access to the target path.</li>
+                <li>If a delete fails, check the sampled failure detail and the Deduplarr server log before retrying in bulk.</li>
+              </ul>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Scheduling</h2>
+                <span class="section-status">Avoid racing Plex</span>
+              </div>
+              <p>Schedule Deduplarr after Plex and post-processing jobs normally finish. If Plex scans at 3:00 AM and Tdarr often runs afterward, give Deduplarr a buffer instead of scheduling it at the same time.</p>
+              <ul class="instruction-list">
+                <li>Media and subtitle schedules are separate.</li>
+                <li>Scheduled scans use the server container's local time.</li>
+                <li>Monthly schedules on days beyond the current month run on that month's last day.</li>
+                <li>Scheduled Deduplarr scans do not force Plex to scan first.</li>
+              </ul>
+            </section>
+          </div>
         </section>
 
         <section id="settingsView" class="view">

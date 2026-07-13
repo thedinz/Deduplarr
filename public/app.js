@@ -1890,6 +1890,7 @@ function setupNavigation() {
       elements.pageTitle.textContent = {
         duplicates: "Media Duplicates",
         subtitles: "Subtitle Cleanup",
+        instructions: "Instructions",
         settings: "Settings"
       }[button.dataset.view] || "Deduplarr";
     });
