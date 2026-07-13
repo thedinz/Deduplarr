@@ -855,6 +855,42 @@ button {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
 }
 
+.schedule-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #1a1e23;
+}
+
+.schedule-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+
+.schedule-heading strong {
+  font-size: 14px;
+}
+
+.schedule-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-grid {
+  grid-template-columns: minmax(150px, 0.65fr) minmax(130px, 0.45fr) minmax(150px, 0.55fr) minmax(120px, 0.35fr);
+}
+
+.schedule-grid[data-frequency="off"] label:not(:first-child),
+.schedule-grid:not([data-frequency="weekly"]) .schedule-weekly-field,
+.schedule-grid:not([data-frequency="monthly"]) .schedule-monthly-field {
+  display: none;
+}
+
 .password-grid {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
 }

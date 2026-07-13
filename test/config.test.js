@@ -32,6 +32,20 @@ test("settings survive a fresh config read", async (t) => {
       flags: ["default"],
       deleteNonPreferredLanguages: true
     },
+    scanSchedules: {
+      media: {
+        frequency: "weekly",
+        time: "04:30",
+        dayOfWeek: 2,
+        dayOfMonth: 12
+      },
+      subtitles: {
+        frequency: "monthly",
+        time: "02:15",
+        dayOfWeek: 5,
+        dayOfMonth: 31
+      }
+    },
     authMode: "external",
     authUsername: "operator",
     externalUserHeaders: ["x-forwarded-user"]
@@ -56,6 +70,28 @@ test("settings survive a fresh config read", async (t) => {
     flags: ["default"],
     deleteNonPreferredLanguages: true
   });
+  assert.deepEqual(loaded.scanSchedules, {
+    media: {
+      frequency: "weekly",
+      time: "04:30",
+      dayOfWeek: 2,
+      dayOfMonth: 12,
+      lastRunAt: ""
+    },
+    subtitles: {
+      frequency: "monthly",
+      time: "02:15",
+      dayOfWeek: 5,
+      dayOfMonth: 31,
+      lastRunAt: ""
+    }
+  });
   assert.equal(loaded.auth.mode, "external");
   assert.equal(loaded.auth.username, "operator");
+
+  await configModule.markScheduledScanRun("media", "2026-07-13T08:00:00.000Z");
+  const marked = await configModule.getRuntimeConfig();
+
+  assert.equal(marked.scanSchedules.media.lastRunAt, "2026-07-13T08:00:00.000Z");
+  assert.equal(marked.scanSchedules.subtitles.lastRunAt, "");
 });

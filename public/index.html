@@ -219,6 +219,86 @@
             </div>
             <div class="settings-section">
               <div class="section-heading">
+                <h2>Scan Schedules</h2>
+                <span class="section-status">Server time</span>
+              </div>
+              <div class="schedule-block">
+                <div class="schedule-heading">
+                  <strong>Media Files</strong>
+                  <span id="mediaScheduleStatus">Off</span>
+                </div>
+                <div class="field-grid schedule-grid" data-schedule="media">
+                  <label>
+                    <span>Frequency</span>
+                    <select id="mediaScheduleFrequencyInput" name="mediaScheduleFrequency">
+                      <option value="off">Off</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Time</span>
+                    <input id="mediaScheduleTimeInput" name="mediaScheduleTime" type="time">
+                  </label>
+                  <label class="schedule-weekly-field">
+                    <span>Weekday</span>
+                    <select id="mediaScheduleDayOfWeekInput" name="mediaScheduleDayOfWeek">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </label>
+                  <label class="schedule-monthly-field">
+                    <span>Month Day</span>
+                    <input id="mediaScheduleDayOfMonthInput" name="mediaScheduleDayOfMonth" type="number" min="1" max="31" step="1">
+                  </label>
+                </div>
+              </div>
+              <div class="schedule-block">
+                <div class="schedule-heading">
+                  <strong>Subtitle Files</strong>
+                  <span id="subtitleScheduleStatus">Off</span>
+                </div>
+                <div class="field-grid schedule-grid" data-schedule="subtitles">
+                  <label>
+                    <span>Frequency</span>
+                    <select id="subtitleScheduleFrequencyInput" name="subtitleScheduleFrequency">
+                      <option value="off">Off</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Time</span>
+                    <input id="subtitleScheduleTimeInput" name="subtitleScheduleTime" type="time">
+                  </label>
+                  <label class="schedule-weekly-field">
+                    <span>Weekday</span>
+                    <select id="subtitleScheduleDayOfWeekInput" name="subtitleScheduleDayOfWeek">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </label>
+                  <label class="schedule-monthly-field">
+                    <span>Month Day</span>
+                    <input id="subtitleScheduleDayOfMonthInput" name="subtitleScheduleDayOfMonth" type="number" min="1" max="31" step="1">
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
                 <h2>Keep Preferences</h2>
                 <span id="selectionStatus" class="section-status">Manual</span>
               </div>

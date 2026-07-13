@@ -138,6 +138,16 @@ const elements = {
   plexTokenInput: document.querySelector("#plexTokenInput"),
   scanPageSizeInput: document.querySelector("#scanPageSizeInput"),
   allowDeletesInput: document.querySelector("#allowDeletesInput"),
+  mediaScheduleFrequencyInput: document.querySelector("#mediaScheduleFrequencyInput"),
+  mediaScheduleTimeInput: document.querySelector("#mediaScheduleTimeInput"),
+  mediaScheduleDayOfWeekInput: document.querySelector("#mediaScheduleDayOfWeekInput"),
+  mediaScheduleDayOfMonthInput: document.querySelector("#mediaScheduleDayOfMonthInput"),
+  mediaScheduleStatus: document.querySelector("#mediaScheduleStatus"),
+  subtitleScheduleFrequencyInput: document.querySelector("#subtitleScheduleFrequencyInput"),
+  subtitleScheduleTimeInput: document.querySelector("#subtitleScheduleTimeInput"),
+  subtitleScheduleDayOfWeekInput: document.querySelector("#subtitleScheduleDayOfWeekInput"),
+  subtitleScheduleDayOfMonthInput: document.querySelector("#subtitleScheduleDayOfMonthInput"),
+  subtitleScheduleStatus: document.querySelector("#subtitleScheduleStatus"),
   selectionModeInput: document.querySelector("#selectionModeInput"),
   preferredContainersInput: document.querySelector("#preferredContainersInput"),
   preferredVideoCodecsInput: document.querySelector("#preferredVideoCodecsInput"),
@@ -591,6 +601,64 @@ function showApp(session) {
   icons();
 }
 
+function scheduleElements(kind) {
+  const prefix = kind === "media" ? "media" : "subtitle";
+  const scheduleKey = kind === "media" ? "media" : "subtitles";
+  return {
+    frequency: elements[`${prefix}ScheduleFrequencyInput`],
+    time: elements[`${prefix}ScheduleTimeInput`],
+    dayOfWeek: elements[`${prefix}ScheduleDayOfWeekInput`],
+    dayOfMonth: elements[`${prefix}ScheduleDayOfMonthInput`],
+    status: elements[`${prefix}ScheduleStatus`],
+    grid: document.querySelector(`.schedule-grid[data-schedule="${scheduleKey}"]`)
+  };
+}
+
+function scheduleStatusText(schedule = {}) {
+  if ((schedule.frequency || "off") === "off") return "Off";
+  if (!schedule.lastRunAt) return "Not run";
+
+  const date = new Date(schedule.lastRunAt);
+  if (Number.isNaN(date.getTime())) return "Not run";
+  return `Last run ${date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  })}`;
+}
+
+function updateScheduleControls(kind) {
+  const controls = scheduleElements(kind);
+  const frequency = controls.frequency?.value || "off";
+  controls.grid?.setAttribute("data-frequency", frequency);
+  if (controls.time) controls.time.disabled = frequency === "off";
+  if (controls.dayOfWeek) controls.dayOfWeek.disabled = frequency !== "weekly";
+  if (controls.dayOfMonth) controls.dayOfMonth.disabled = frequency !== "monthly";
+}
+
+function renderScheduleControls(kind, schedule = {}) {
+  const controls = scheduleElements(kind);
+  if (!controls.frequency) return;
+
+  controls.frequency.value = schedule.frequency || "off";
+  controls.time.value = schedule.time || "03:00";
+  controls.dayOfWeek.value = String(schedule.dayOfWeek ?? 1);
+  controls.dayOfMonth.value = schedule.dayOfMonth || 1;
+  controls.status.textContent = scheduleStatusText(schedule);
+  updateScheduleControls(kind);
+}
+
+function schedulePayload(kind) {
+  const controls = scheduleElements(kind);
+  return {
+    frequency: controls.frequency?.value || "off",
+    time: controls.time?.value || "03:00",
+    dayOfWeek: Number(controls.dayOfWeek?.value ?? 1),
+    dayOfMonth: Number(controls.dayOfMonth?.value || 1)
+  };
+}
+
 function renderConfig() {
   if (!state.config) return;
   elements.plexUrlInput.value = state.config.plexUrl || "";
@@ -600,6 +668,8 @@ function renderConfig() {
     : "Paste token to add or replace";
   elements.scanPageSizeInput.value = state.config.scanPageSize || 200;
   elements.allowDeletesInput.checked = Boolean(state.config.allowDeletes);
+  renderScheduleControls("media", state.config.scanSchedules?.media);
+  renderScheduleControls("subtitles", state.config.scanSchedules?.subtitles);
   state.selectionMode = state.config.selectionMode || "manual";
   elements.reviewModeSelect.value = state.selectionMode;
   elements.selectionModeInput.value = state.selectionMode;
@@ -659,6 +729,10 @@ function plexFormPayload(includeAuth = false) {
       formats: splitList(elements.preferredSubtitleFormatsInput.value),
       flags: splitList(elements.preferredSubtitleFlagsInput.value),
       deleteNonPreferredLanguages: elements.deleteNonPreferredSubtitleLanguagesInput.checked
+    },
+    scanSchedules: {
+      media: schedulePayload("media"),
+      subtitles: schedulePayload("subtitles")
     }
   };
 
@@ -1871,6 +1945,8 @@ function setupEvents() {
     renderSubtitleGroups();
   });
   elements.selectionModeInput.addEventListener("change", () => setReviewMode(elements.selectionModeInput.value));
+  elements.mediaScheduleFrequencyInput.addEventListener("change", () => updateScheduleControls("media"));
+  elements.subtitleScheduleFrequencyInput.addEventListener("change", () => updateScheduleControls("subtitles"));
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);
   elements.confirmDeleteButton.addEventListener("click", deleteActiveFile);

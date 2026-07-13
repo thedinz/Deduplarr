@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getRuntimeConfig, publicConfig, saveConfig } from "./config.js";
+import {
+  getRuntimeConfig,
+  markScheduledScanRun,
+  publicConfig,
+  saveConfig
+} from "./config.js";
 import {
   clearSessionCookie,
   createSessionToken,
@@ -18,6 +23,8 @@ const rootDir = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 7889);
 const scanJobs = new Map();
+const SCHEDULER_INTERVAL_MS = 60 * 1000;
+let schedulerChecking = false;
 
 app.disable("x-powered-by");
 app.set("trust proxy", true);
@@ -35,6 +42,8 @@ function asyncRoute(handler) {
 function serializeScanJob(job) {
   return {
     id: job.id,
+    kind: job.kind,
+    source: job.source,
     status: job.status,
     progress: job.progress,
     message: job.message,
@@ -58,6 +67,137 @@ function cleanupScanJobs() {
   for (const [id, job] of scanJobs.entries()) {
     const finished = Date.parse(job.finishedAt || job.updatedAt || job.startedAt);
     if (finished < cutoff) scanJobs.delete(id);
+  }
+}
+
+function createScanJob(kind, source = "manual") {
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    source,
+    status: "queued",
+    progress: 0,
+    message: source === "scheduled" ? "Scheduled" : "Queued",
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    finishedAt: null,
+    result: null,
+    error: null
+  };
+}
+
+function startScanJob(kind, config, libraryKeys = [], source = "manual") {
+  cleanupScanJobs();
+  const job = createScanJob(kind, source);
+  scanJobs.set(job.id, job);
+  if (kind === "subtitles") runSubtitleScanJob(job.id, config, libraryKeys);
+  else runScanJob(job.id, config, libraryKeys);
+  return job;
+}
+
+function hasActiveScanJob(kind) {
+  for (const job of scanJobs.values()) {
+    if (job.kind === kind && ["queued", "running"].includes(job.status)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function scheduleTimeParts(time) {
+  const [hour, minute] = String(time || "03:00")
+    .split(":")
+    .map((value) => Number(value));
+  return {
+    hour: Number.isInteger(hour) ? hour : 3,
+    minute: Number.isInteger(minute) ? minute : 0
+  };
+}
+
+function daysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function sameLocalDate(left, right) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function scheduledOccurrence(schedule, now = new Date()) {
+  if (!schedule || schedule.frequency === "off") return null;
+
+  const { hour, minute } = scheduleTimeParts(schedule.time);
+  const occurrence = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    hour,
+    minute,
+    0,
+    0
+  );
+
+  if (schedule.frequency === "weekly" && now.getDay() !== Number(schedule.dayOfWeek)) {
+    return null;
+  }
+
+  if (schedule.frequency === "monthly") {
+    const day = Math.min(
+      Math.max(Number(schedule.dayOfMonth) || 1, 1),
+      daysInMonth(now.getFullYear(), now.getMonth())
+    );
+    if (now.getDate() !== day) return null;
+  }
+
+  return occurrence;
+}
+
+function scheduleIsDue(schedule, now = new Date()) {
+  const occurrence = scheduledOccurrence(schedule, now);
+  if (!occurrence || now < occurrence) return false;
+
+  const lastRun = schedule.lastRunAt ? new Date(schedule.lastRunAt) : null;
+  return !lastRun || Number.isNaN(lastRun.getTime()) || !sameLocalDate(lastRun, occurrence);
+}
+
+async function checkScheduledScans() {
+  if (schedulerChecking) return;
+  schedulerChecking = true;
+
+  try {
+    const config = await getRuntimeConfig();
+    const now = new Date();
+    const scheduledScans = [
+      { kind: "media", label: "media", schedule: config.scanSchedules?.media },
+      { kind: "subtitles", label: "subtitle", schedule: config.scanSchedules?.subtitles }
+    ];
+
+    for (const { kind, label, schedule } of scheduledScans) {
+      if (!scheduleIsDue(schedule, now)) continue;
+
+      const startedAt = now.toISOString();
+      await markScheduledScanRun(kind, startedAt);
+
+      if (hasActiveScanJob(kind)) {
+        console.log(
+          `[${startedAt}] Scheduled ${label} scan skipped because a ${label} scan is already running.`
+        );
+        continue;
+      }
+
+      const job = startScanJob(kind, config, [], "scheduled");
+      console.log(`[${startedAt}] Scheduled ${label} scan started: ${job.id}`);
+    }
+  } catch (error) {
+    console.warn(
+      `[${new Date().toISOString()}] Scheduled scan check failed`,
+      error.message || error
+    );
+  } finally {
+    schedulerChecking = false;
   }
 }
 
@@ -317,24 +457,11 @@ app.get(
 app.post(
   "/api/scan",
   asyncRoute(async (request, response) => {
-    cleanupScanJobs();
     const config = request.runtimeConfig || (await getRuntimeConfig());
     const libraryKeys = Array.isArray(request.body?.libraryKeys)
       ? request.body.libraryKeys.map(String)
       : [];
-    const job = {
-      id: crypto.randomUUID(),
-      status: "queued",
-      progress: 0,
-      message: "Queued",
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      finishedAt: null,
-      result: null,
-      error: null
-    };
-    scanJobs.set(job.id, job);
-    runScanJob(job.id, config, libraryKeys);
+    const job = startScanJob("media", config, libraryKeys, "manual");
     response.status(202).json(serializeScanJob(job));
   })
 );
@@ -342,24 +469,11 @@ app.post(
 app.post(
   "/api/subtitle-scan",
   asyncRoute(async (request, response) => {
-    cleanupScanJobs();
     const config = request.runtimeConfig || (await getRuntimeConfig());
     const libraryKeys = Array.isArray(request.body?.libraryKeys)
       ? request.body.libraryKeys.map(String)
       : [];
-    const job = {
-      id: crypto.randomUUID(),
-      status: "queued",
-      progress: 0,
-      message: "Queued",
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      finishedAt: null,
-      result: null,
-      error: null
-    };
-    scanJobs.set(job.id, job);
-    runSubtitleScanJob(job.id, config, libraryKeys);
+    const job = startScanJob("subtitles", config, libraryKeys, "manual");
     response.status(202).json(serializeScanJob(job));
   })
 );
@@ -490,4 +604,6 @@ app.use((error, _request, response, _next) => {
 
 app.listen(port, () => {
   console.log(`Deduplarr listening on http://localhost:${port}`);
+  setTimeout(checkScheduledScans, 10 * 1000);
+  setInterval(checkScheduledScans, SCHEDULER_INTERVAL_MS);
 });
