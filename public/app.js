@@ -24,6 +24,9 @@ const state = {
   subtitleRenderLimit: SUBTITLE_GROUP_RENDER_BATCH,
   activeDelete: null,
   deleteInProgress: false,
+  deleteCancelRequested: false,
+  deleteAbortController: null,
+  deleteProgress: null,
   preferenceOptions: {
     containers: [],
     videoCodecs: [],
@@ -165,6 +168,8 @@ const elements = {
   deleteLogPanel: document.querySelector("#deleteLogPanel"),
   deleteLogCount: document.querySelector("#deleteLogCount"),
   deleteLogEntries: document.querySelector("#deleteLogEntries"),
+  deleteCancelButton: document.querySelector("#deleteCancelButton"),
+  deleteCloseButton: document.querySelector("#deleteCloseButton"),
   confirmDeleteButton: document.querySelector("#confirmDeleteButton"),
   deleteCancelButtons: document.querySelectorAll("#deleteDialog button[value='cancel']")
 };
@@ -421,16 +426,25 @@ function renderSubtitleScanProgress(job, startedAt = state.subtitleScanStartedAt
   elements.subtitleScanProgressFill.style.width = `${progress}%`;
 }
 
-function renderDeleteProgress({ completed = 0, total = 0, failures = 0, message = "Deleting" }) {
+function renderDeleteProgress({
+  completed = 0,
+  total = 0,
+  failures = 0,
+  skipped = 0,
+  message = "Deleting"
+}) {
   const progress = total ? Math.max(0, Math.min(100, (completed / total) * 100)) : 0;
   const failureText = failures ? ` | ${formatInteger(failures)} failed` : "";
+  const skippedText = skipped ? ` | ${formatInteger(skipped)} skipped` : "";
+  state.deleteProgress = { completed, total, failures, skipped, message };
   elements.deleteProgressPanel.classList.remove("is-hidden");
   elements.deleteProgressText.textContent = message;
-  elements.deleteProgressMeta.textContent = `${formatInteger(completed)} / ${formatInteger(total)}${failureText}`;
+  elements.deleteProgressMeta.textContent = `${formatInteger(completed)} / ${formatInteger(total)}${failureText}${skippedText}`;
   elements.deleteProgressFill.style.width = `${progress}%`;
 }
 
 function resetDeleteProgress() {
+  state.deleteProgress = null;
   elements.deleteProgressPanel.classList.add("is-hidden");
   elements.deleteProgressText.textContent = "Queued";
   elements.deleteProgressMeta.textContent = "0 / 0";
@@ -469,26 +483,53 @@ function renderDeleteLog(failureCount = 0, samples = []) {
       : "");
 }
 
+function updateDeleteCancelControls() {
+  const title = state.deleteInProgress
+    ? state.deleteCancelRequested
+      ? "Stopping delete job"
+      : "Cancel delete job"
+    : "Close";
+
+  elements.deleteCancelButtons.forEach((button) => {
+    button.disabled = false;
+    button.title = title;
+  });
+  if (elements.deleteCancelButton) {
+    elements.deleteCancelButton.textContent =
+      state.deleteInProgress && state.deleteCancelRequested ? "Stopping" : "Cancel";
+  }
+}
+
 function setDeleteDialogBusy(busy) {
   state.deleteInProgress = busy;
   elements.confirmDeleteButton.disabled = busy;
   elements.deleteConfirmInput.disabled = busy;
   elements.deleteRejectedButton.disabled = busy;
   elements.deleteRejectedSubtitlesButton.disabled = busy;
-  elements.deleteCancelButtons.forEach((button) => {
-    button.disabled = busy;
-  });
+  updateDeleteCancelControls();
 }
 
 function prepareDeleteDialog() {
   state.deleteInProgress = false;
+  state.deleteCancelRequested = false;
+  state.deleteAbortController = null;
   elements.confirmDeleteButton.disabled = false;
   elements.deleteConfirmInput.disabled = false;
-  elements.deleteCancelButtons.forEach((button) => {
-    button.disabled = false;
-  });
+  updateDeleteCancelControls();
   resetDeleteProgress();
   resetDeleteLog();
+}
+
+function requestDeleteCancel() {
+  if (!state.deleteInProgress || state.deleteCancelRequested) return;
+
+  state.deleteCancelRequested = true;
+  state.deleteAbortController?.abort();
+  updateDeleteCancelControls();
+  renderDeleteProgress({
+    ...(state.deleteProgress || {}),
+    message: "Canceling delete"
+  });
 }
 
 function clearScanTimers() {
@@ -1427,10 +1468,11 @@ async function logout() {
   showLogin({ authMode: state.config?.auth?.mode || "builtin" });
 }
 
-function deleteTarget(target, kind) {
+function deleteTarget(target, kind, signal) {
   if (kind === "subtitle") {
     return api("/api/subtitle-delete", {
       method: "POST",
+      signal,
       body: JSON.stringify({
         streamId: target.streamId,
         streamKey: target.streamKey,
@@ -1444,6 +1486,7 @@ function deleteTarget(target, kind) {
 
   return api("/api/delete", {
     method: "POST",
+    signal,
     body: JSON.stringify({
       ratingKey: target.ratingKey,
       mediaId: target.mediaId,
@@ -1500,7 +1543,7 @@ function waitForPaint() {
   });
 }
 
-async function deleteTargetsWithProgress(targets, kind, bulk) {
+async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
   const failures = [];
   const failureSamples = [];
   const deletedTargets = [];
@@ -1517,6 +1560,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
       completed,
       total,
       failures: failures.length,
+      skipped: state.deleteCancelRequested ? Math.max(total - completed, 0) : 0,
       message: `Deleting ${deleteTargetLabel(kind)}`
     });
     renderDeleteLog(failures.length, failureSamples);
@@ -1526,19 +1570,21 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
   await waitForPaint();
 
   async function worker() {
-    while (cursor < total) {
+    while (cursor < total && !state.deleteCancelRequested && !signal?.aborted) {
       const target = targets[cursor];
       cursor += 1;
 
       try {
-        await deleteTarget(target, kind);
+        await deleteTarget(target, kind, signal);
         deletedTargets.push(target);
       } catch (error) {
-        failures.push({ target, error });
-        if (failureSamples.length < DELETE_FAILURE_SAMPLE_LIMIT) {
-          failureSamples.push(deleteFailureSample(target, kind, error));
+        if (!(state.deleteCancelRequested && error.name === "AbortError")) {
+          failures.push({ target, error });
+          if (failureSamples.length < DELETE_FAILURE_SAMPLE_LIMIT) {
+            failureSamples.push(deleteFailureSample(target, kind, error));
+          }
+          if (!bulk) throw error;
         }
-        if (!bulk) throw error;
       } finally {
         completed += 1;
         paint();
@@ -1548,15 +1594,27 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
 
   const workerCount = bulk ? Math.min(DELETE_CONCURRENCY, total) : 1;
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  const skipped = state.deleteCancelRequested ? Math.max(total - completed, 0) : 0;
   renderDeleteProgress({
     completed,
     total,
     failures: failures.length,
-    message: failures.length ? "Delete finished with failures" : "Delete complete"
+    skipped,
+    message: state.deleteCancelRequested
+      ? "Delete canceled"
+      : failures.length
+        ? "Delete finished with failures"
+        : "Delete complete"
   });
   renderDeleteLog(failures.length, failureSamples);
 
-  return { deleted: deletedTargets.length, deletedTargets, failures };
+  return {
+    deleted: deletedTargets.length,
+    deletedTargets,
+    failures,
+    canceled: state.deleteCancelRequested,
+    skipped
+  };
 }
 
 function subtitleStatsFromGroups(groups, previousStats = {}) {
@@ -1625,26 +1683,43 @@ async function deleteActiveFile(event) {
   if (!targets.length) return;
   elements.deleteConfirmInput.setCustomValidity("");
 
+  state.deleteCancelRequested = false;
+  state.deleteAbortController = new AbortController();
   setDeleteDialogBusy(true);
   let keepFailureDialogOpen = false;
   try {
-    const { deleted, deletedTargets, failures } = await deleteTargetsWithProgress(targets, kind, bulk);
+    const { deleted, deletedTargets, failures, canceled, skipped } =
+      await deleteTargetsWithProgress(
+        targets,
+        kind,
+        bulk,
+        state.deleteAbortController.signal
+      );
     keepFailureDialogOpen = bulk && failures.length > 0;
     if (!keepFailureDialogOpen) elements.deleteDialog.close();
 
     if (kind === "subtitle") {
       removeDeletedSubtitleTargets(deletedTargets);
       renderSubtitleGroups();
-    } else {
+    } else if (deletedTargets.length) {
       await scan();
     }
 
-    if (bulk && failures.length) {
-      const message = `Deleted ${deleted} ${kind === "subtitle" ? "subtitle sidecars" : "media versions"}; ${failures.length} failed. First error: ${failures[0].error.message}`;
+    const label = deleteTargetLabel(kind);
+    if (canceled && failures.length) {
+      const message = `Canceled after deleting ${deleted} ${label}; ${skipped} skipped; ${failures.length} failed. First error: ${failures[0].error.message}`;
+      if (kind === "subtitle") setSubtitleMessage(message, "error");
+      else setMessage(message, "error");
+    } else if (canceled) {
+      const message = `Canceled after deleting ${deleted} ${label}; ${skipped} skipped.`;
+      if (kind === "subtitle") setSubtitleMessage(message, deleted ? "success" : "");
+      else setMessage(message, deleted ? "success" : "");
+    } else if (bulk && failures.length) {
+      const message = `Deleted ${deleted} ${label}; ${failures.length} failed. First error: ${failures[0].error.message}`;
       if (kind === "subtitle") setSubtitleMessage(message, "error");
       else setMessage(message, "error");
     } else if (bulk) {
-      const message = `Deleted ${deleted} rejected ${kind === "subtitle" ? "subtitle sidecars" : "media versions"}.`;
+      const message = `Deleted ${deleted} rejected ${label}.`;
       if (kind === "subtitle") setSubtitleMessage(message, "success");
       else setMessage(message, "success");
     }
@@ -1653,12 +1728,11 @@ async function deleteActiveFile(event) {
     else setMessage(error.message, "error");
   } finally {
     setDeleteDialogBusy(false);
+    state.deleteAbortController = null;
     if (keepFailureDialogOpen && elements.deleteDialog.open) {
       elements.confirmDeleteButton.disabled = true;
       elements.deleteConfirmInput.disabled = true;
-      elements.deleteCancelButtons.forEach((button) => {
-        button.disabled = false;
-      });
+      updateDeleteCancelControls();
     }
     if (!elements.deleteDialog.open) state.activeDelete = null;
     updateBulkDeleteButton();
@@ -1734,12 +1808,23 @@ function setupEvents() {
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);
   elements.confirmDeleteButton.addEventListener("click", deleteActiveFile);
+  elements.deleteCancelButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (!state.deleteInProgress) return;
+      event.preventDefault();
+      requestDeleteCancel();
+    });
+  });
   elements.deleteDialog.addEventListener("cancel", (event) => {
-    if (state.deleteInProgress) event.preventDefault();
+    if (!state.deleteInProgress) return;
+    event.preventDefault();
+    requestDeleteCancel();
   });
   elements.deleteDialog.addEventListener("close", () => {
     if (state.deleteInProgress) return;
     state.activeDelete = null;
+    state.deleteCancelRequested = false;
+    state.deleteAbortController = null;
     resetDeleteProgress();
   });
 }

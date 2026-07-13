@@ -367,7 +367,7 @@
       <form method="dialog">
         <header>
           <h2 id="deleteDialogTitle">Delete File</h2>
-          <button class="icon-button ghost" value="cancel" title="Close">
+          <button id="deleteCloseButton" class="icon-button ghost" value="cancel" title="Close">
             <i data-lucide="x"></i>
           </button>
         </header>
@@ -394,7 +394,7 @@
           <div id="deleteLogEntries" class="delete-log-entries"></div>
         </div>
         <menu>
-          <button class="secondary-button" value="cancel">Cancel</button>
+          <button id="deleteCancelButton" class="secondary-button" value="cancel">Cancel</button>
           <button id="confirmDeleteButton" class="danger-button" value="default">
             <i data-lucide="trash-2"></i>
             <span>Delete</span>
