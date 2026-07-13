@@ -1,5 +1,6 @@
 const SUBTITLE_GROUP_RENDER_BATCH = 75;
 const DELETE_CONCURRENCY = 4;
+const DELETE_FAILURE_SAMPLE_LIMIT = 8;
 const DELETE_PROGRESS_UPDATE_MS = 120;
 
 const state = {
@@ -161,6 +162,9 @@ const elements = {
   deleteProgressText: document.querySelector("#deleteProgressText"),
   deleteProgressMeta: document.querySelector("#deleteProgressMeta"),
   deleteProgressFill: document.querySelector("#deleteProgressFill"),
+  deleteLogPanel: document.querySelector("#deleteLogPanel"),
+  deleteLogCount: document.querySelector("#deleteLogCount"),
+  deleteLogEntries: document.querySelector("#deleteLogEntries"),
   confirmDeleteButton: document.querySelector("#confirmDeleteButton"),
   deleteCancelButtons: document.querySelectorAll("#deleteDialog button[value='cancel']")
 };
@@ -183,7 +187,10 @@ async function api(path, options = {}) {
     if (response.status === 401 && !["/api/session", "/api/login"].includes(path)) {
       showLogin(data);
     }
-    throw new Error(data.error || `${response.status} ${response.statusText}`);
+    const error = new Error(data.error || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    error.details = data.details || {};
+    throw error;
   }
   return data;
 }
@@ -430,6 +437,38 @@ function resetDeleteProgress() {
   elements.deleteProgressFill.style.width = "0%";
 }
 
+function resetDeleteLog() {
+  elements.deleteLogPanel.classList.add("is-hidden");
+  elements.deleteLogCount.textContent = "0 failed";
+  elements.deleteLogEntries.innerHTML = "";
+}
+
+function renderDeleteLog(failureCount = 0, samples = []) {
+  if (!failureCount) {
+    resetDeleteLog();
+    return;
+  }
+
+  elements.deleteLogPanel.classList.remove("is-hidden");
+  elements.deleteLogCount.textContent = `${formatInteger(failureCount)} failed`;
+  const omitted = Math.max(failureCount - samples.length, 0);
+  elements.deleteLogEntries.innerHTML =
+    samples
+      .map(
+        (sample) => `
+          <div class="delete-log-entry">
+            <strong>${escapeHtml(sample.name)}</strong>
+            <span>${escapeHtml(sample.message)}</span>
+            ${sample.target ? `<code>${escapeHtml(sample.target)}</code>` : ""}
+          </div>
+        `
+      )
+      .join("") +
+    (omitted
+      ? `<div class="delete-log-more">${formatInteger(omitted)} more failures not shown</div>`
+      : "");
+}
+
 function setDeleteDialogBusy(busy) {
   state.deleteInProgress = busy;
   elements.confirmDeleteButton.disabled = busy;
@@ -449,6 +488,7 @@ function prepareDeleteDialog() {
     button.disabled = false;
   });
   resetDeleteProgress();
+  resetDeleteLog();
 }
 
 function clearScanTimers() {
@@ -1393,7 +1433,10 @@ function deleteTarget(target, kind) {
       method: "POST",
       body: JSON.stringify({
         streamId: target.streamId,
+        streamKey: target.streamKey,
         extension: target.extension,
+        title: target.displayTitle || target.streamTitle || target.title,
+        sidecarPath: target.sidecarPath,
         confirmText: "DELETE"
       })
     });
@@ -1413,6 +1456,43 @@ function deleteTargetLabel(kind) {
   return kind === "subtitle" ? "subtitle sidecars" : "media versions";
 }
 
+function deleteTargetName(target, kind) {
+  if (kind === "subtitle") {
+    return target.displayTitle || target.streamTitle || target.language || "Subtitle sidecar";
+  }
+  return target.fileName || target.file || "Media version";
+}
+
+function deleteTargetPath(target, kind) {
+  if (kind === "subtitle") {
+    return target.sidecarPath || target.streamKey || target.partFile || "";
+  }
+  return target.file || "";
+}
+
+function deleteFailureMessage(error) {
+  const details = error.details || {};
+  const status = details.plexStatus || error.status || "";
+  const body = details.plexBody || "";
+  const target = details.target || "";
+  const parts = [
+    status ? `HTTP ${status}` : "",
+    details.plexStatusText,
+    body,
+    !body ? error.message : "",
+    target ? `target ${target}` : ""
+  ].filter(Boolean);
+  return parts.join(" | ") || error.message || "Delete failed";
+}
+
+function deleteFailureSample(target, kind, error) {
+  return {
+    name: deleteTargetName(target, kind),
+    target: deleteTargetPath(target, kind),
+    message: deleteFailureMessage(error)
+  };
+}
+
 function waitForPaint() {
   return new Promise((resolve) => {
     if (window.requestAnimationFrame) window.requestAnimationFrame(() => resolve());
@@ -1422,6 +1502,7 @@ function waitForPaint() {
 
 async function deleteTargetsWithProgress(targets, kind, bulk) {
   const failures = [];
+  const failureSamples = [];
   const deletedTargets = [];
   const total = targets.length;
   let cursor = 0;
@@ -1438,6 +1519,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
       failures: failures.length,
       message: `Deleting ${deleteTargetLabel(kind)}`
     });
+    renderDeleteLog(failures.length, failureSamples);
   };
 
   paint(true);
@@ -1453,6 +1535,9 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
         deletedTargets.push(target);
       } catch (error) {
         failures.push({ target, error });
+        if (failureSamples.length < DELETE_FAILURE_SAMPLE_LIMIT) {
+          failureSamples.push(deleteFailureSample(target, kind, error));
+        }
         if (!bulk) throw error;
       } finally {
         completed += 1;
@@ -1469,6 +1554,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk) {
     failures: failures.length,
     message: failures.length ? "Delete finished with failures" : "Delete complete"
   });
+  renderDeleteLog(failures.length, failureSamples);
 
   return { deleted: deletedTargets.length, deletedTargets, failures };
 }
@@ -1540,9 +1626,11 @@ async function deleteActiveFile(event) {
   elements.deleteConfirmInput.setCustomValidity("");
 
   setDeleteDialogBusy(true);
+  let keepFailureDialogOpen = false;
   try {
     const { deleted, deletedTargets, failures } = await deleteTargetsWithProgress(targets, kind, bulk);
-    elements.deleteDialog.close();
+    keepFailureDialogOpen = bulk && failures.length > 0;
+    if (!keepFailureDialogOpen) elements.deleteDialog.close();
 
     if (kind === "subtitle") {
       removeDeletedSubtitleTargets(deletedTargets);
@@ -1565,6 +1653,13 @@ async function deleteActiveFile(event) {
     else setMessage(error.message, "error");
   } finally {
     setDeleteDialogBusy(false);
+    if (keepFailureDialogOpen && elements.deleteDialog.open) {
+      elements.confirmDeleteButton.disabled = true;
+      elements.deleteConfirmInput.disabled = true;
+      elements.deleteCancelButtons.forEach((button) => {
+        button.disabled = false;
+      });
+    }
     if (!elements.deleteDialog.open) state.activeDelete = null;
     updateBulkDeleteButton();
     updateBulkSubtitleDeleteButton();

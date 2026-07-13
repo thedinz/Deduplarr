@@ -61,6 +61,26 @@ function cleanupScanJobs() {
   }
 }
 
+function deleteErrorDetails(error, extra = {}) {
+  return {
+    ...extra,
+    target: error.target || extra.target || "",
+    plexStatus: error.status || "",
+    plexStatusText: error.responseStatusText || "",
+    plexBody: error.responseBody || ""
+  };
+}
+
+function logDeleteFailure(kind, details, error) {
+  console.warn(
+    `[${new Date().toISOString()}] ${kind} delete failed`,
+    JSON.stringify({
+      ...details,
+      error: error.message || "Delete failed"
+    })
+  );
+}
+
 async function runScanJob(id, config, libraryKeys) {
   try {
     const client = new PlexClient(config);
@@ -388,12 +408,24 @@ app.post(
     }
 
     const client = new PlexClient(config);
-    response.json(
-      await client.deleteMedia(
-        String(request.body?.ratingKey || ""),
-        String(request.body?.mediaId || "")
-      )
-    );
+    try {
+      response.json(
+        await client.deleteMedia(
+          String(request.body?.ratingKey || ""),
+          String(request.body?.mediaId || "")
+        )
+      );
+    } catch (error) {
+      const details = deleteErrorDetails(error, {
+        ratingKey: String(request.body?.ratingKey || ""),
+        mediaId: String(request.body?.mediaId || "")
+      });
+      logDeleteFailure("media", details, error);
+      response.status(error.status >= 400 && error.status < 600 ? error.status : 500).json({
+        error: error.message || "Media delete failed.",
+        details
+      });
+    }
   })
 );
 
@@ -415,12 +447,28 @@ app.post(
     }
 
     const client = new PlexClient(config);
-    response.json(
-      await client.deleteSubtitleStream(
-        String(request.body?.streamId || ""),
-        String(request.body?.extension || "")
-      )
-    );
+    try {
+      response.json(
+        await client.deleteSubtitleStream(
+          String(request.body?.streamId || ""),
+          String(request.body?.extension || ""),
+          String(request.body?.streamKey || "")
+        )
+      );
+    } catch (error) {
+      const details = deleteErrorDetails(error, {
+        streamId: String(request.body?.streamId || ""),
+        streamKey: String(request.body?.streamKey || ""),
+        extension: String(request.body?.extension || ""),
+        title: String(request.body?.title || ""),
+        sidecarPath: String(request.body?.sidecarPath || "")
+      });
+      logDeleteFailure("subtitle", details, error);
+      response.status(error.status >= 400 && error.status < 600 ? error.status : 500).json({
+        error: error.message || "Subtitle delete failed.",
+        details
+      });
+    }
   })
 );
 

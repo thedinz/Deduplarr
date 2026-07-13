@@ -66,16 +66,44 @@ test("deleteSubtitleStream uses Plex's stream deletion endpoint", async (t) => {
     plexUrl: "http://plex.example:32400",
     plexToken: "secret"
   });
+  const result = await client.deleteSubtitleStream("789", "subrip", "/library/streams/789");
+
+  assert.equal(request.options.method, "DELETE");
+  assert.equal(
+    request.url,
+    "http://plex.example:32400/library/streams/789?X-Plex-Token=secret"
+  );
+  assert.deepEqual(result, {
+    deleted: true,
+    target: "/library/streams/789"
+  });
+});
+
+test("deleteSubtitleStream falls back to stream ID when the stream key is unavailable", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url: String(url), options };
+    return new Response("", { status: 200 });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
   const result = await client.deleteSubtitleStream("789", "subrip");
 
   assert.equal(request.options.method, "DELETE");
   assert.equal(
     request.url,
-    "http://plex.example:32400/library/streams/789.srt?X-Plex-Token=secret"
+    "http://plex.example:32400/library/streams/789?X-Plex-Token=secret"
   );
   assert.deepEqual(result, {
     deleted: true,
-    target: "/library/streams/789.srt"
+    target: "/library/streams/789"
   });
 });
 

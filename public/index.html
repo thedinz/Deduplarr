@@ -386,6 +386,13 @@
             <div id="deleteProgressFill" class="scan-progress-fill"></div>
           </div>
         </div>
+        <div id="deleteLogPanel" class="delete-log-panel is-hidden" aria-live="polite">
+          <div class="delete-log-header">
+            <span>Recent failures</span>
+            <span id="deleteLogCount">0 failed</span>
+          </div>
+          <div id="deleteLogEntries" class="delete-log-entries"></div>
+        </div>
         <menu>
           <button class="secondary-button" value="cancel">Cancel</button>
           <button id="confirmDeleteButton" class="danger-button" value="default">
