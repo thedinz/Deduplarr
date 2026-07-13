@@ -20,12 +20,18 @@ const state = {
   preferenceOptions: {
     containers: [],
     videoCodecs: [],
-    audioCodecs: []
+    audioCodecs: [],
+    subtitleLanguages: [],
+    subtitleFormats: [],
+    subtitleFlags: []
   },
   preferenceSelections: {
     containers: new Set(),
     videoCodecs: new Set(),
-    audioCodecs: new Set()
+    audioCodecs: new Set(),
+    subtitleLanguages: new Set(),
+    subtitleFormats: new Set(),
+    subtitleFlags: new Set()
   }
 };
 
@@ -44,6 +50,29 @@ const preferenceFields = [
     key: "audioCodecs",
     input: "preferredAudioCodecsInput",
     format: (value) => value.toUpperCase()
+  },
+  {
+    key: "subtitleLanguages",
+    input: "preferredSubtitleLanguagesInput",
+    format: (value) => value.replace(/\b\w/g, (character) => character.toUpperCase())
+  },
+  {
+    key: "subtitleFormats",
+    input: "preferredSubtitleFormatsInput",
+    format: (value) => `.${value}`
+  },
+  {
+    key: "subtitleFlags",
+    input: "preferredSubtitleFlagsInput",
+    format: (value) =>
+      ({
+        selected: "Selected in Plex",
+        default: "Default",
+        forced: "Forced",
+        sdh: "SDH/CC",
+        standard: "Standard",
+        "auto-sync": "Auto-sync"
+      })[value] || value.replace(/\b\w/g, (character) => character.toUpperCase())
   }
 ];
 
@@ -102,6 +131,9 @@ const elements = {
   preferredContainersInput: document.querySelector("#preferredContainersInput"),
   preferredVideoCodecsInput: document.querySelector("#preferredVideoCodecsInput"),
   preferredAudioCodecsInput: document.querySelector("#preferredAudioCodecsInput"),
+  preferredSubtitleLanguagesInput: document.querySelector("#preferredSubtitleLanguagesInput"),
+  preferredSubtitleFormatsInput: document.querySelector("#preferredSubtitleFormatsInput"),
+  preferredSubtitleFlagsInput: document.querySelector("#preferredSubtitleFlagsInput"),
   selectionStatus: document.querySelector("#selectionStatus"),
   authModeInput: document.querySelector("#authModeInput"),
   authUsernameInput: document.querySelector("#authUsernameInput"),
@@ -253,6 +285,39 @@ function preferenceValuesFromScan(scan) {
   };
 }
 
+function subtitleFlagOptions(subtitle) {
+  const flags = [];
+  if (subtitle.selected) flags.push("selected");
+  if (subtitle.default) flags.push("default");
+  if (subtitle.forced) flags.push("forced");
+  if (subtitle.hearingImpaired) flags.push("sdh");
+  else flags.push("standard");
+  if (subtitle.canAutoSync) flags.push("auto-sync");
+  return flags;
+}
+
+function preferenceValuesFromSubtitleScan(scan) {
+  const options = {
+    subtitleLanguages: [],
+    subtitleFormats: [],
+    subtitleFlags: []
+  };
+
+  for (const group of scan?.groups || []) {
+    for (const subtitle of group.subtitles || []) {
+      options.subtitleLanguages.push(subtitle.language, subtitle.languageCode);
+      options.subtitleFormats.push(subtitle.extension, subtitle.codec);
+      options.subtitleFlags.push(...subtitleFlagOptions(subtitle));
+    }
+  }
+
+  return {
+    subtitleLanguages: uniqueSorted(options.subtitleLanguages),
+    subtitleFormats: uniqueSorted(options.subtitleFormats),
+    subtitleFlags: uniqueSorted(options.subtitleFlags)
+  };
+}
+
 function renderPreferenceControl(key) {
   const control = preferenceControl(key);
   const field = preferenceFieldConfig(key);
@@ -391,6 +456,9 @@ function renderConfig() {
   setPreferenceSelection("containers", state.config.keepPreferences?.containers || []);
   setPreferenceSelection("videoCodecs", state.config.keepPreferences?.videoCodecs || []);
   setPreferenceSelection("audioCodecs", state.config.keepPreferences?.audioCodecs || []);
+  setPreferenceSelection("subtitleLanguages", state.config.subtitlePreferences?.languages || []);
+  setPreferenceSelection("subtitleFormats", state.config.subtitlePreferences?.formats || []);
+  setPreferenceSelection("subtitleFlags", state.config.subtitlePreferences?.flags || []);
   renderPreferenceControls();
   elements.selectionStatus.textContent = state.selectionMode === "auto" ? "Auto" : "Manual";
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
@@ -432,6 +500,11 @@ function plexFormPayload(includeAuth = false) {
       containers: splitList(elements.preferredContainersInput.value),
       videoCodecs: splitList(elements.preferredVideoCodecsInput.value),
       audioCodecs: splitList(elements.preferredAudioCodecsInput.value)
+    },
+    subtitlePreferences: {
+      languages: splitList(elements.preferredSubtitleLanguagesInput.value),
+      formats: splitList(elements.preferredSubtitleFormatsInput.value),
+      flags: splitList(elements.preferredSubtitleFlagsInput.value)
     }
   };
 
@@ -1043,7 +1116,10 @@ async function scan() {
     }
 
     state.scan = state.scanJob.result;
-    state.preferenceOptions = preferenceValuesFromScan(state.scan);
+    state.preferenceOptions = {
+      ...state.preferenceOptions,
+      ...preferenceValuesFromScan(state.scan)
+    };
     renderPreferenceControls();
     initializeGroupSelections();
     renderStats(state.scan.stats);
@@ -1101,6 +1177,11 @@ async function subtitleScan() {
     }
 
     state.subtitleScan = state.subtitleScanJob.result;
+    state.preferenceOptions = {
+      ...state.preferenceOptions,
+      ...preferenceValuesFromSubtitleScan(state.subtitleScan)
+    };
+    renderPreferenceControls();
     initializeSubtitleSelections();
     renderSubtitleStats(state.subtitleScan.stats);
     renderSubtitleGroups();

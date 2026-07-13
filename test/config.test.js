@@ -26,6 +26,11 @@ test("settings survive a fresh config read", async (t) => {
       videoCodecs: ["hevc"],
       audioCodecs: ["eac3"]
     },
+    subtitlePreferences: {
+      languages: ["English"],
+      formats: ["srt"],
+      flags: ["default"]
+    },
     authMode: "external",
     authUsername: "operator",
     externalUserHeaders: ["x-forwarded-user"]
@@ -43,6 +48,11 @@ test("settings survive a fresh config read", async (t) => {
     containers: ["mp4"],
     videoCodecs: ["hevc"],
     audioCodecs: ["eac3"]
+  });
+  assert.deepEqual(loaded.subtitlePreferences, {
+    languages: ["english"],
+    formats: ["srt"],
+    flags: ["default"]
   });
   assert.equal(loaded.auth.mode, "external");
   assert.equal(loaded.auth.username, "operator");

@@ -267,6 +267,47 @@
             </div>
             <div class="settings-section">
               <div class="section-heading">
+                <h2>Subtitle Preferences</h2>
+                <span class="section-status">Sidecars</span>
+              </div>
+              <div class="field-grid subtitle-preferences-grid">
+                <div class="preference-field">
+                  <span>Languages</span>
+                  <div class="multi-select" data-preference="subtitleLanguages">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleLanguagesInput" name="preferredSubtitleLanguages" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Formats / Extensions</span>
+                  <div class="multi-select" data-preference="subtitleFormats">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleFormatsInput" name="preferredSubtitleFormats" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Flags</span>
+                  <div class="multi-select" data-preference="subtitleFlags">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleFlagsInput" name="preferredSubtitleFlags" type="hidden">
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
                 <h2>Authentication</h2>
                 <span id="authStatus" class="section-status">Built-in</span>
               </div>

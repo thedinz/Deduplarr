@@ -191,4 +191,18 @@ test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams",
   assert.equal(result.stats.sidecars, 2);
   assert.equal(result.stats.duplicateSidecars, 1);
   assert.equal(result.stats.ignoredNonSidecar, 2);
+
+  const preferredClient = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret",
+    subtitlePreferences: {
+      formats: ["ass"]
+    }
+  });
+  const preferred = await preferredClient.subtitleDuplicates(["1"]);
+
+  assert.equal(preferred.groups[0].suggestedSubtitleId, "10:20:30:102");
+  assert.deepEqual(preferred.groups[0].subtitles[0].score.preferenceReasons, [
+    "Preferred ASS"
+  ]);
 });

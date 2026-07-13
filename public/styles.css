@@ -769,6 +769,10 @@ button {
   grid-template-columns: minmax(150px, 0.5fr) repeat(3, minmax(180px, 1fr));
 }
 
+.subtitle-preferences-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
 .password-grid {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
 }

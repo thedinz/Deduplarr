@@ -125,6 +125,67 @@ function subtitleVariantLabel(record) {
     .join(" ");
 }
 
+function normalizedPreferenceList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => text(item).trim().replace(/^\./, "").toLowerCase())
+    .filter(Boolean);
+}
+
+function subtitleFlagValues(record) {
+  const flags = [];
+  if (record.selected) flags.push("selected");
+  if (record.default) flags.push("default");
+  if (record.forced) flags.push("forced");
+  if (record.hearingImpaired) flags.push("sdh", "cc", "hearingimpaired");
+  else flags.push("standard");
+  if (record.canAutoSync) flags.push("autosync", "auto-sync");
+  return flags;
+}
+
+function subtitlePreferenceMatches(record, preferences = {}) {
+  const reasons = [];
+  const languages = normalizedPreferenceList(preferences.languages);
+  const formats = normalizedPreferenceList(preferences.formats);
+  const flags = normalizedPreferenceList(preferences.flags);
+  const languageValues = [
+    record.languageCode,
+    record.language,
+    record.raw?.languageCode,
+    record.raw?.languageTag,
+    record.raw?.language
+  ]
+    .map((value) => text(value).trim().toLowerCase())
+    .filter(Boolean);
+  const formatValues = [record.extension, record.codec, record.raw?.codec, record.raw?.format]
+    .map((value) => text(value).trim().replace(/^\./, "").toLowerCase())
+    .filter(Boolean);
+  const flagValues = subtitleFlagValues(record);
+
+  for (const preference of languages) {
+    if (languageValues.some((value) => value === preference || value.includes(preference))) {
+      reasons.push(`Preferred ${record.language || preference.toUpperCase()}`);
+      break;
+    }
+  }
+
+  for (const preference of formats) {
+    if (formatValues.some((value) => value === preference || value.includes(preference))) {
+      reasons.push(`Preferred ${preference.toUpperCase()}`);
+      break;
+    }
+  }
+
+  for (const preference of flags) {
+    if (flagValues.includes(preference)) {
+      reasons.push(`Preferred ${preference.replace(/-/g, " ")}`);
+      break;
+    }
+  }
+
+  return reasons;
+}
+
 function normalizeBaseUrl(input) {
   const trimmed = text(input).trim();
   if (!trimmed) throw new Error("Plex URL is required.");
@@ -245,7 +306,7 @@ function duplicateReason(item, files, cameFromDuplicateFilter) {
   return "multiple files";
 }
 
-function subtitleScore(record) {
+function subtitleScore(record, preferences = {}) {
   const reasons = [];
   let value = 0;
 
@@ -267,7 +328,7 @@ function subtitleScore(record) {
     value += 4;
     reasons.push(record.extension.toUpperCase());
   }
-  if (record.title && !/unknown/i.test(record.title)) {
+  if (record.streamTitle && !/unknown/i.test(record.streamTitle)) {
     value += 5;
     reasons.push("Named");
   }
@@ -276,8 +337,15 @@ function subtitleScore(record) {
     reasons.push("Can auto-sync");
   }
 
+  const preferenceReasons = subtitlePreferenceMatches(record, preferences);
+  reasons.push(...preferenceReasons);
+  const preferenceValue = preferenceReasons.length;
+
   return {
     value,
+    preferenceValue,
+    preferenceRank: preferenceValue * 1000 + value,
+    preferenceReasons,
     reasons: reasons.length ? reasons : ["Sidecar subtitle"]
   };
 }
@@ -298,7 +366,7 @@ function subtitleReason(records) {
   return `${records.length} ${subtitleVariantLabel(sample).toLowerCase()} sidecars`;
 }
 
-function flattenSidecarSubtitles(item, library) {
+function flattenSidecarSubtitles(item, library, subtitlePreferences = {}) {
   const mediaItems = asArray(item.Media);
   const records = [];
   let ignoredNonSidecar = 0;
@@ -359,14 +427,14 @@ function flattenSidecarSubtitles(item, library) {
           raw: stream
         };
 
-        record.score = subtitleScore(record);
+        record.score = subtitleScore(record, subtitlePreferences);
         records.push(record);
       });
     });
   });
 
   return {
-    records: records.sort((a, b) => b.score.value - a.score.value),
+    records: records.sort((a, b) => b.score.preferenceRank - a.score.preferenceRank),
     scannedSubtitles,
     ignoredNonSidecar
   };
@@ -396,6 +464,7 @@ export class PlexClient {
     this.token = config.plexToken;
     this.pageSize = Math.max(25, Math.min(Number(config.scanPageSize || 200), 1000));
     this.keepPreferences = config.keepPreferences || {};
+    this.subtitlePreferences = config.subtitlePreferences || {};
     if (!this.token) throw new Error("Plex token is required.");
   }
 
@@ -733,7 +802,7 @@ export class PlexClient {
 
       for (const item of detailed) {
         const { records, scannedSubtitles, ignoredNonSidecar: ignored } =
-          flattenSidecarSubtitles(item, library);
+          flattenSidecarSubtitles(item, library, this.subtitlePreferences);
         totalSubtitleStreams += scannedSubtitles;
         totalSidecars += records.length;
         ignoredNonSidecar += ignored;
