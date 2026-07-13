@@ -10,7 +10,7 @@ const parser = new XMLParser({
 const PLEX_HEADERS = {
   Accept: "application/json",
   "X-Plex-Product": "Deduplarr",
-  "X-Plex-Version": "0.1.0",
+  "X-Plex-Version": "0.2.0",
   "X-Plex-Client-Identifier": "deduplarr-local",
   "X-Plex-Platform": "Docker",
   "X-Plex-Device": "Deduplarr"

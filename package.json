@@ -1,6 +1,6 @@
 {
   "name": "deduplarr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Docker-first Plex duplicate cleanup companion with an arr-style UI.",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
