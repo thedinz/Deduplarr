@@ -18,7 +18,8 @@ const DEFAULT_KEEP_PREFERENCES = {
 const DEFAULT_SUBTITLE_PREFERENCES = {
   languages: [],
   formats: [],
-  flags: []
+  flags: [],
+  deleteNonPreferredLanguages: false
 };
 
 const processSessionSecret = crypto.randomBytes(32).toString("hex");
@@ -66,7 +67,8 @@ function subtitlePreferences(value = {}) {
   return {
     languages: cleanPreferenceList(value.languages),
     formats: cleanPreferenceList(value.formats),
-    flags: cleanPreferenceList(value.flags)
+    flags: cleanPreferenceList(value.flags),
+    deleteNonPreferredLanguages: Boolean(value.deleteNonPreferredLanguages)
   };
 }
 

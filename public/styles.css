@@ -475,6 +475,10 @@ button {
   background: rgba(47, 155, 204, 0.06);
 }
 
+.file-row.delete-all-row {
+  background: rgba(217, 95, 89, 0.08);
+}
+
 .file-row:last-child {
   border-bottom: 0;
 }
@@ -531,6 +535,15 @@ button {
   color: #d8f3ff;
   background: rgba(47, 155, 204, 0.16);
   border-color: rgba(72, 184, 232, 0.48);
+}
+
+.delete-badge {
+  color: #ffd9d7;
+  background: rgba(217, 95, 89, 0.14);
+  border: 1px solid rgba(217, 95, 89, 0.55);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
 }
 
 .file-path {

@@ -184,6 +184,27 @@ function subtitlePreferenceMatches(record, preferences = {}) {
   return reasons;
 }
 
+function subtitleLanguageMatchesPreferences(record, preferences = {}) {
+  const languages = normalizedPreferenceList(preferences.languages);
+  if (!languages.length) return false;
+  const languageValues = [
+    record.languageCode,
+    record.language,
+    record.languageTag
+  ]
+    .map((value) => text(value).trim().toLowerCase())
+    .filter(Boolean);
+  return languages.some((preference) =>
+    languageValues.some((value) => value === preference || value.includes(preference))
+  );
+}
+
+function shouldDeleteAllSubtitleGroup(records, preferences = {}) {
+  const languages = normalizedPreferenceList(preferences.languages);
+  if (!preferences.deleteNonPreferredLanguages || !languages.length) return false;
+  return records.every((record) => !subtitleLanguageMatchesPreferences(record, preferences));
+}
+
 function normalizeBaseUrl(input) {
   const trimmed = text(input).trim();
   if (!trimmed) throw new Error("Plex URL is required.");
@@ -362,6 +383,10 @@ function subtitleGroupingKey(record) {
 function subtitleReason(records) {
   const sample = records[0] || {};
   return `${records.length} ${subtitleVariantLabel(sample).toLowerCase()} sidecars`;
+}
+
+function subtitleGroupId(sample) {
+  return `${sample.libraryKey}:${sample.ratingKey}:${sample.mediaId || sample.mediaIndex}:${sample.partId || sample.partIndex}:${sample.languageCode}:${sample.forced ? "forced" : "full"}:${sample.hearingImpaired ? "sdh" : "standard"}`;
 }
 
 function flattenSidecarSubtitles(item, library, subtitlePreferences = {}) {
@@ -814,10 +839,14 @@ export class PlexClient {
         }
 
         for (const recordsInGroup of grouped.values()) {
-          if (recordsInGroup.length < 2) continue;
+          const deleteAll = shouldDeleteAllSubtitleGroup(
+            recordsInGroup,
+            this.subtitlePreferences
+          );
+          if (recordsInGroup.length < 2 && !deleteAll) continue;
           const sample = recordsInGroup[0];
           allGroups.push({
-            id: `${sample.libraryKey}:${sample.ratingKey}:${sample.mediaId || sample.mediaIndex}:${sample.partId || sample.partIndex}:${sample.languageCode}:${sample.forced ? "forced" : "full"}:${sample.hearingImpaired ? "sdh" : "standard"}`,
+            id: subtitleGroupId(sample),
             ratingKey: sample.ratingKey,
             libraryKey: sample.libraryKey,
             libraryTitle: sample.libraryTitle,
@@ -830,8 +859,9 @@ export class PlexClient {
             languageCode: sample.languageCode,
             forced: sample.forced,
             hearingImpaired: sample.hearingImpaired,
-            reason: subtitleReason(recordsInGroup),
-            suggestedSubtitleId: recordsInGroup[0]?.id || "",
+            deleteAll,
+            reason: deleteAll ? "non-preferred language" : subtitleReason(recordsInGroup),
+            suggestedSubtitleId: deleteAll ? "" : recordsInGroup[0]?.id || "",
             subtitles: recordsInGroup
           });
         }
@@ -857,6 +887,14 @@ export class PlexClient {
         sidecars: totalSidecars,
         duplicateSidecars: allGroups.reduce(
           (sum, group) => sum + Math.max((group.subtitles || []).length - 1, 0),
+          0
+        ),
+        cleanupSidecars: allGroups.reduce(
+          (sum, group) =>
+            sum +
+            (group.deleteAll
+              ? (group.subtitles || []).length
+              : Math.max((group.subtitles || []).length - 1, 0)),
           0
         ),
         ignoredNonSidecar

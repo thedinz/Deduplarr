@@ -41,11 +41,11 @@
         <nav class="nav-list" aria-label="Primary">
           <button class="nav-item active" data-view="duplicates">
             <i data-lucide="copy"></i>
-            <span>Duplicates</span>
+            <span>Media Files</span>
           </button>
           <button class="nav-item" data-view="subtitles">
             <i data-lucide="captions"></i>
-            <span>Subtitles</span>
+            <span>Subtitle Files</span>
           </button>
           <button class="nav-item" data-view="settings">
             <i data-lucide="settings"></i>
@@ -57,7 +57,7 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <h1 id="pageTitle">Duplicates</h1>
+            <h1 id="pageTitle">Media Duplicates</h1>
             <p id="serverSummary">Not connected to Plex</p>
           </div>
           <div class="topbar-actions">
@@ -305,6 +305,10 @@
                   </div>
                 </div>
               </div>
+              <label class="toggle-row">
+                <input id="deleteNonPreferredSubtitleLanguagesInput" name="deleteNonPreferredSubtitleLanguages" type="checkbox">
+                <span>Delete non-preferred languages</span>
+              </label>
             </div>
             <div class="settings-section">
               <div class="section-heading">

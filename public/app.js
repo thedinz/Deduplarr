@@ -137,6 +137,7 @@ const elements = {
   preferredSubtitleLanguagesInput: document.querySelector("#preferredSubtitleLanguagesInput"),
   preferredSubtitleFormatsInput: document.querySelector("#preferredSubtitleFormatsInput"),
   preferredSubtitleFlagsInput: document.querySelector("#preferredSubtitleFlagsInput"),
+  deleteNonPreferredSubtitleLanguagesInput: document.querySelector("#deleteNonPreferredSubtitleLanguagesInput"),
   selectionStatus: document.querySelector("#selectionStatus"),
   authModeInput: document.querySelector("#authModeInput"),
   authUsernameInput: document.querySelector("#authUsernameInput"),
@@ -462,6 +463,9 @@ function renderConfig() {
   setPreferenceSelection("subtitleLanguages", state.config.subtitlePreferences?.languages || []);
   setPreferenceSelection("subtitleFormats", state.config.subtitlePreferences?.formats || []);
   setPreferenceSelection("subtitleFlags", state.config.subtitlePreferences?.flags || []);
+  elements.deleteNonPreferredSubtitleLanguagesInput.checked = Boolean(
+    state.config.subtitlePreferences?.deleteNonPreferredLanguages
+  );
   renderPreferenceControls();
   elements.selectionStatus.textContent = state.selectionMode === "auto" ? "Auto" : "Manual";
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
@@ -507,7 +511,8 @@ function plexFormPayload(includeAuth = false) {
     subtitlePreferences: {
       languages: splitList(elements.preferredSubtitleLanguagesInput.value),
       formats: splitList(elements.preferredSubtitleFormatsInput.value),
-      flags: splitList(elements.preferredSubtitleFlagsInput.value)
+      flags: splitList(elements.preferredSubtitleFlagsInput.value),
+      deleteNonPreferredLanguages: elements.deleteNonPreferredSubtitleLanguagesInput.checked
     }
   };
 
@@ -573,7 +578,7 @@ function renderStats(stats = {}) {
 function renderSubtitleStats(stats = {}) {
   elements.subtitleGroupCount.textContent = stats.groups || 0;
   elements.subtitleFileCount.textContent = stats.sidecars || 0;
-  elements.subtitleRejectedCount.textContent = rejectedSubtitleTargets().length || stats.duplicateSidecars || 0;
+  elements.subtitleRejectedCount.textContent = rejectedSubtitleTargets().length;
   elements.subtitleLibraryCount.textContent = stats.libraries || state.libraries.length || 0;
 }
 
@@ -601,7 +606,13 @@ function autoSelectSuggested() {
 
 function autoSelectSuggestedSubtitles() {
   let selected = 0;
+  let deleteAll = 0;
   for (const group of state.subtitleScan?.groups || []) {
+    if (group.deleteAll) {
+      state.subtitleGroupSelections.delete(group.id);
+      deleteAll += 1;
+      continue;
+    }
     const suggested = group.suggestedSubtitleId;
     if (suggested) {
       state.subtitleGroupSelections.set(group.id, suggested);
@@ -610,10 +621,10 @@ function autoSelectSuggestedSubtitles() {
   }
   renderSubtitleGroups();
   setSubtitleMessage(
-    selected
-      ? `Selected suggested keepers for ${selected} subtitle groups.`
+    selected || deleteAll
+      ? `Selected suggested keepers for ${selected} groups; ${deleteAll} groups marked delete all.`
       : "No subtitle suggestions to select.",
-    selected ? "success" : ""
+    selected || deleteAll ? "success" : ""
   );
 }
 
@@ -706,10 +717,10 @@ function rejectedSubtitleTargets() {
   const targets = new Map();
   for (const group of state.subtitleScan?.groups || []) {
     const keeperId = state.subtitleGroupSelections.get(group.id);
-    if (!keeperId) continue;
+    if (!keeperId && !group.deleteAll) continue;
 
     for (const subtitle of group.subtitles || []) {
-      if (subtitle.id === keeperId) continue;
+      if (!group.deleteAll && subtitle.id === keeperId) continue;
       const target = subtitleTargetKey(subtitle);
       if (target) targets.set(target, subtitle);
     }
@@ -865,10 +876,11 @@ function subtitleKeepButton(group, subtitle, isSelectedKeep) {
 
 function subtitleDeleteButton(subtitle, selectedSubtitleId) {
   const isSelectedKeep = subtitle.id === selectedSubtitleId;
-  const disabled = !state.config?.allowDeletes || !selectedSubtitleId || isSelectedKeep ? "disabled" : "";
+  const deleteAll = Boolean(subtitle.deleteAll);
+  const disabled = !state.config?.allowDeletes || (!selectedSubtitleId && !deleteAll) || isSelectedKeep ? "disabled" : "";
   const title = !state.config?.allowDeletes
     ? "Deletes disabled"
-    : !selectedSubtitleId
+    : !selectedSubtitleId && !deleteAll
       ? "Choose keeper first"
       : isSelectedKeep
         ? "Selected keeper"
@@ -906,7 +918,7 @@ function renderSubtitleGroups() {
   });
 
   if (!groups.length) {
-    elements.subtitlesList.innerHTML = `<div class="message">No duplicate sidecar subtitles found.</div>`;
+    elements.subtitlesList.innerHTML = `<div class="message">No subtitle cleanup groups found.</div>`;
     icons();
     return;
   }
@@ -921,15 +933,17 @@ function renderSubtitleGroups() {
         .map((subtitle) => {
           const isSuggested = subtitle.id === group.suggestedSubtitleId;
           const isSelectedKeep = subtitle.id === selectedSubtitleId;
+          const subtitleAction = { ...subtitle, deleteAll: group.deleteAll };
           const path = subtitle.sidecarPath || subtitle.streamKey || group.partFile;
           return `
-            <div class="file-row subtitle-row ${isSelectedKeep ? "selected-keep" : ""} ${isSuggested ? "suggested-file" : ""}">
+            <div class="file-row subtitle-row ${isSelectedKeep ? "selected-keep" : ""} ${isSuggested ? "suggested-file" : ""} ${group.deleteAll ? "delete-all-row" : ""}">
               <div class="score ${isSuggested ? "suggested" : ""}">${subtitle.score?.value || 0}</div>
               <div class="file-main">
                 <div class="file-name">
                   <span>${escapeHtml(subtitle.displayTitle || subtitle.streamTitle || subtitle.language || "Subtitle")}</span>
                   ${isSuggested ? '<span class="suggested-badge">Suggested</span>' : ""}
                   ${isSelectedKeep ? '<span class="keep-badge">Keep</span>' : ""}
+                  ${group.deleteAll ? '<span class="delete-badge">Delete All</span>' : ""}
                 </div>
                 <div class="file-path">${escapeHtml(path)}</div>
               </div>
@@ -942,8 +956,8 @@ function renderSubtitleGroups() {
                 <span>${escapeHtml((subtitle.score?.reasons || []).join(" | "))}</span>
               </div>
               <div class="row-actions">
-                ${subtitleKeepButton(group, subtitle, isSelectedKeep)}
-                ${subtitleDeleteButton(subtitle, selectedSubtitleId)}
+                ${group.deleteAll ? "" : subtitleKeepButton(group, subtitle, isSelectedKeep)}
+                ${subtitleDeleteButton(subtitleAction, selectedSubtitleId)}
               </div>
             </div>
           `;
@@ -960,7 +974,7 @@ function renderSubtitleGroups() {
             <div class="group-meta">
               <span class="pill">${escapeHtml(group.reason)}</span>
               <span class="pill">${group.subtitles.length} sidecars</span>
-              <span class="pill">${selectedSubtitleId ? "Keeper selected" : "Choose keeper"}</span>
+              <span class="pill">${group.deleteAll ? "Delete all" : selectedSubtitleId ? "Keeper selected" : "Choose keeper"}</span>
             </div>
           </header>
           ${rows}
@@ -1067,7 +1081,7 @@ function openBulkSubtitleDelete() {
   state.activeDelete = { kind: "subtitle", mode: "bulk", targets };
   elements.deleteDialogTitle.textContent = "Delete Rejected Subtitles";
   elements.deleteFileName.textContent = `${targets.length} subtitle sidecars will be permanently deleted`;
-  elements.deleteFilePath.textContent = `${new Set(targets.map((subtitle) => subtitle.partFile)).size} media files across scanned duplicate subtitle groups`;
+  elements.deleteFilePath.textContent = `${new Set(targets.map((subtitle) => subtitle.partFile)).size} media files across scanned subtitle cleanup groups`;
   elements.deleteConfirmLabel.textContent = "Type DELETE ALL to confirm";
   elements.deleteConfirmInput.placeholder = "DELETE ALL";
   elements.deleteConfirmInput.value = "";
@@ -1397,8 +1411,8 @@ function setupNavigation() {
       button.classList.add("active");
       document.querySelector(`#${button.dataset.view}View`).classList.add("active-view");
       elements.pageTitle.textContent = {
-        duplicates: "Duplicates",
-        subtitles: "Subtitles",
+        duplicates: "Media Duplicates",
+        subtitles: "Subtitle Cleanup",
         settings: "Settings"
       }[button.dataset.view] || "Deduplarr";
     });

@@ -29,7 +29,8 @@ test("settings survive a fresh config read", async (t) => {
     subtitlePreferences: {
       languages: ["English"],
       formats: ["srt"],
-      flags: ["default"]
+      flags: ["default"],
+      deleteNonPreferredLanguages: true
     },
     authMode: "external",
     authUsername: "operator",
@@ -52,7 +53,8 @@ test("settings survive a fresh config read", async (t) => {
   assert.deepEqual(loaded.subtitlePreferences, {
     languages: ["english"],
     formats: ["srt"],
-    flags: ["default"]
+    flags: ["default"],
+    deleteNonPreferredLanguages: true
   });
   assert.equal(loaded.auth.mode, "external");
   assert.equal(loaded.auth.username, "operator");

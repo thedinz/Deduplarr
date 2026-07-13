@@ -147,6 +147,15 @@ test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams",
                         language: "English",
                         languageCode: "eng",
                         displayTitle: "English Downloaded"
+                      },
+                      {
+                        streamType: 3,
+                        id: 105,
+                        key: "/library/streams/105",
+                        codec: "srt",
+                        language: "Spanish",
+                        languageCode: "spa",
+                        displayTitle: "Spanish (SRT External)"
                       }
                     ]
                   }
@@ -188,8 +197,8 @@ test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams",
     ["101", "102"]
   );
   assert.equal(result.groups[0].subtitles.some((subtitle) => "raw" in subtitle), false);
-  assert.equal(result.stats.subtitleStreams, 4);
-  assert.equal(result.stats.sidecars, 2);
+  assert.equal(result.stats.subtitleStreams, 5);
+  assert.equal(result.stats.sidecars, 3);
   assert.equal(result.stats.duplicateSidecars, 1);
   assert.equal(result.stats.ignoredNonSidecar, 2);
 
@@ -206,4 +215,26 @@ test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams",
   assert.deepEqual(preferred.groups[0].subtitles[0].score.preferenceReasons, [
     "Preferred ASS"
   ]);
+
+  const languageCleanupClient = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret",
+    subtitlePreferences: {
+      languages: ["English"],
+      deleteNonPreferredLanguages: true
+    }
+  });
+  const languageCleanup = await languageCleanupClient.subtitleDuplicates(["1"]);
+  const spanishGroup = languageCleanup.groups.find(
+    (group) => group.languageCode === "spa"
+  );
+
+  assert.equal(languageCleanup.groups.length, 2);
+  assert.equal(spanishGroup.deleteAll, true);
+  assert.equal(spanishGroup.suggestedSubtitleId, "");
+  assert.deepEqual(
+    spanishGroup.subtitles.map((subtitle) => subtitle.streamId),
+    ["105"]
+  );
+  assert.equal(languageCleanup.stats.cleanupSidecars, 2);
 });
