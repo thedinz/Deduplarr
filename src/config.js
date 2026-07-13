@@ -15,6 +15,23 @@ const DEFAULT_KEEP_PREFERENCES = {
   videoCodecs: [],
   audioCodecs: []
 };
+const DEFAULT_SUBTITLE_PREFERENCES = {
+  languages: [],
+  formats: [],
+  flags: [],
+  deleteNonPreferredLanguages: false
+};
+const DEFAULT_SCAN_SCHEDULE = {
+  frequency: "off",
+  time: "03:00",
+  dayOfWeek: 1,
+  dayOfMonth: 1,
+  lastRunAt: ""
+};
+const DEFAULT_SCAN_SCHEDULES = {
+  media: DEFAULT_SCAN_SCHEDULE,
+  subtitles: DEFAULT_SCAN_SCHEDULE
+};
 
 const processSessionSecret = crypto.randomBytes(32).toString("hex");
 
@@ -38,6 +55,32 @@ function selectionMode(value) {
   return value === "auto" ? "auto" : "manual";
 }
 
+function scanFrequency(value) {
+  return ["daily", "weekly", "monthly"].includes(value) ? value : "off";
+}
+
+function scanTime(value, fallback = DEFAULT_SCAN_SCHEDULE.time) {
+  const raw = String(value || "").trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(raw) ? raw : fallback;
+}
+
+function scanDayOfWeek(value, fallback = DEFAULT_SCAN_SCHEDULE.dayOfWeek) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 6) return fallback;
+  return parsed;
+}
+
+function scanDayOfMonth(value, fallback = DEFAULT_SCAN_SCHEDULE.dayOfMonth) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 31) return fallback;
+  return parsed;
+}
+
+function scanLastRunAt(value = "") {
+  const raw = String(value || "").trim();
+  return Number.isNaN(Date.parse(raw)) ? "" : raw;
+}
+
 function cleanPreferenceList(value) {
   const source = Array.isArray(value) ? value : String(value || "").split(",");
   return [
@@ -54,6 +97,32 @@ function keepPreferences(value = {}) {
     containers: cleanPreferenceList(value.containers),
     videoCodecs: cleanPreferenceList(value.videoCodecs),
     audioCodecs: cleanPreferenceList(value.audioCodecs)
+  };
+}
+
+function subtitlePreferences(value = {}) {
+  return {
+    languages: cleanPreferenceList(value.languages),
+    formats: cleanPreferenceList(value.formats),
+    flags: cleanPreferenceList(value.flags),
+    deleteNonPreferredLanguages: Boolean(value.deleteNonPreferredLanguages)
+  };
+}
+
+function scanSchedule(value = {}, fallback = DEFAULT_SCAN_SCHEDULE) {
+  return {
+    frequency: scanFrequency(value.frequency),
+    time: scanTime(value.time, fallback.time),
+    dayOfWeek: scanDayOfWeek(value.dayOfWeek, fallback.dayOfWeek),
+    dayOfMonth: scanDayOfMonth(value.dayOfMonth, fallback.dayOfMonth),
+    lastRunAt: scanLastRunAt(value.lastRunAt || fallback.lastRunAt)
+  };
+}
+
+function scanSchedules(value = {}, fallback = DEFAULT_SCAN_SCHEDULES) {
+  return {
+    media: scanSchedule(value.media || {}, fallback.media || DEFAULT_SCAN_SCHEDULE),
+    subtitles: scanSchedule(value.subtitles || {}, fallback.subtitles || DEFAULT_SCAN_SCHEDULE)
   };
 }
 
@@ -76,6 +145,20 @@ export async function readStoredConfig() {
   }
 }
 
+async function writeStoredConfig(next) {
+  await mkdir(CONFIG_DIR, { recursive: true });
+  const temporaryFile = `${CONFIG_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    await rename(temporaryFile, CONFIG_FILE);
+  } finally {
+    await rm(temporaryFile, { force: true });
+  }
+}
+
 export async function getRuntimeConfig() {
   const stored = await readStoredConfig();
   const auth = defaultAuthConfig(stored.auth);
@@ -87,6 +170,10 @@ export async function getRuntimeConfig() {
     scanPageSize: Number(stored.scanPageSize || 200),
     selectionMode: selectionMode(stored.selectionMode),
     keepPreferences: keepPreferences(stored.keepPreferences || DEFAULT_KEEP_PREFERENCES),
+    subtitlePreferences: subtitlePreferences(
+      stored.subtitlePreferences || DEFAULT_SUBTITLE_PREFERENCES
+    ),
+    scanSchedules: scanSchedules(stored.scanSchedules || DEFAULT_SCAN_SCHEDULES),
     auth,
     sessionSecret:
       process.env.SESSION_SECRET || stored.sessionSecret || processSessionSecret
@@ -130,23 +217,41 @@ export async function saveConfig(input, options = {}) {
       input.keepPreferences === undefined
         ? keepPreferences(current.keepPreferences || DEFAULT_KEEP_PREFERENCES)
         : keepPreferences(input.keepPreferences),
+    subtitlePreferences:
+      input.subtitlePreferences === undefined
+        ? subtitlePreferences(current.subtitlePreferences || DEFAULT_SUBTITLE_PREFERENCES)
+        : subtitlePreferences(input.subtitlePreferences),
+    scanSchedules:
+      input.scanSchedules === undefined
+        ? scanSchedules(current.scanSchedules || DEFAULT_SCAN_SCHEDULES)
+        : scanSchedules(
+            input.scanSchedules,
+            scanSchedules(current.scanSchedules || DEFAULT_SCAN_SCHEDULES)
+          ),
     auth: nextAuth,
     sessionSecret:
       current.sessionSecret || process.env.SESSION_SECRET || processSessionSecret
   };
 
-  await mkdir(CONFIG_DIR, { recursive: true });
-  const temporaryFile = `${CONFIG_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  try {
-    await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600
-    });
-    await rename(temporaryFile, CONFIG_FILE);
-  } finally {
-    await rm(temporaryFile, { force: true });
-  }
+  await writeStoredConfig(next);
   return next;
+}
+
+export async function markScheduledScanRun(kind, startedAt = new Date().toISOString()) {
+  const current = await readStoredConfig();
+  const schedules = scanSchedules(current.scanSchedules || DEFAULT_SCAN_SCHEDULES);
+  if (!["media", "subtitles"].includes(kind)) return scanSchedules(schedules);
+
+  schedules[kind] = {
+    ...schedules[kind],
+    lastRunAt: startedAt
+  };
+
+  await writeStoredConfig({
+    ...current,
+    scanSchedules: schedules
+  });
+  return schedules;
 }
 
 export function publicConfig(config) {
@@ -157,6 +262,8 @@ export function publicConfig(config) {
     scanPageSize: config.scanPageSize,
     selectionMode: config.selectionMode,
     keepPreferences: config.keepPreferences,
+    subtitlePreferences: config.subtitlePreferences,
+    scanSchedules: config.scanSchedules,
     auth: {
       mode: config.auth.mode,
       username: config.auth.username,

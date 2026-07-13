@@ -41,7 +41,11 @@
         <nav class="nav-list" aria-label="Primary">
           <button class="nav-item active" data-view="duplicates">
             <i data-lucide="copy"></i>
-            <span>Duplicates</span>
+            <span>Media Files</span>
+          </button>
+          <button class="nav-item" data-view="subtitles">
+            <i data-lucide="captions"></i>
+            <span>Subtitle Files</span>
           </button>
           <button class="nav-item" data-view="settings">
             <i data-lucide="settings"></i>
@@ -53,7 +57,7 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <h1 id="pageTitle">Duplicates</h1>
+            <h1 id="pageTitle">Media Duplicates</h1>
             <p id="serverSummary">Not connected to Plex</p>
           </div>
           <div class="topbar-actions">
@@ -131,6 +135,62 @@
           <div id="duplicatesList" class="duplicates-list"></div>
         </section>
 
+        <section id="subtitlesView" class="view">
+          <div class="toolbar">
+            <div class="library-strip" id="subtitleLibraryStrip"></div>
+            <div class="toolbar-actions">
+              <button id="subtitleAutoSelectButton" class="secondary-button" type="button">
+                <i data-lucide="check-check"></i>
+                <span>Auto Select</span>
+              </button>
+              <button id="deleteRejectedSubtitlesButton" class="danger-button" type="button">
+                <i data-lucide="trash-2"></i>
+                <span>Delete Rejected</span>
+              </button>
+              <label class="search-field">
+                <i data-lucide="search"></i>
+                <input id="subtitleSearchInput" type="search" placeholder="Filter">
+              </label>
+              <button id="subtitleScanButton" class="primary-button">
+                <i data-lucide="radar"></i>
+                <span>Scan</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="subtitleScanProgressPanel" class="scan-progress-panel is-hidden">
+            <div class="scan-progress-header">
+              <span id="subtitleScanProgressText">Queued</span>
+              <span id="subtitleScanProgressMeta">0% | 0:00</span>
+            </div>
+            <div class="scan-progress-track" aria-hidden="true">
+              <div id="subtitleScanProgressFill" class="scan-progress-fill"></div>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <span>Groups</span>
+              <strong id="subtitleGroupCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Sidecars</span>
+              <strong id="subtitleFileCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Rejected</span>
+              <strong id="subtitleRejectedCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Libraries</span>
+              <strong id="subtitleLibraryCount">0</strong>
+            </div>
+          </div>
+
+          <div id="subtitleMessageArea" class="message-area"></div>
+          <div id="subtitlesList" class="duplicates-list"></div>
+        </section>
+
         <section id="settingsView" class="view">
           <form id="settingsForm" class="settings-panel">
             <div class="settings-section first-section">
@@ -156,6 +216,86 @@
                 <input id="allowDeletesInput" name="allowDeletes" type="checkbox">
                 <span>Enable delete buttons</span>
               </label>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
+                <h2>Scan Schedules</h2>
+                <span class="section-status">Server time</span>
+              </div>
+              <div class="schedule-block">
+                <div class="schedule-heading">
+                  <strong>Media Files</strong>
+                  <span id="mediaScheduleStatus">Off</span>
+                </div>
+                <div class="field-grid schedule-grid" data-schedule="media">
+                  <label>
+                    <span>Frequency</span>
+                    <select id="mediaScheduleFrequencyInput" name="mediaScheduleFrequency">
+                      <option value="off">Off</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Time</span>
+                    <input id="mediaScheduleTimeInput" name="mediaScheduleTime" type="time">
+                  </label>
+                  <label class="schedule-weekly-field">
+                    <span>Weekday</span>
+                    <select id="mediaScheduleDayOfWeekInput" name="mediaScheduleDayOfWeek">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </label>
+                  <label class="schedule-monthly-field">
+                    <span>Month Day</span>
+                    <input id="mediaScheduleDayOfMonthInput" name="mediaScheduleDayOfMonth" type="number" min="1" max="31" step="1">
+                  </label>
+                </div>
+              </div>
+              <div class="schedule-block">
+                <div class="schedule-heading">
+                  <strong>Subtitle Files</strong>
+                  <span id="subtitleScheduleStatus">Off</span>
+                </div>
+                <div class="field-grid schedule-grid" data-schedule="subtitles">
+                  <label>
+                    <span>Frequency</span>
+                    <select id="subtitleScheduleFrequencyInput" name="subtitleScheduleFrequency">
+                      <option value="off">Off</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Time</span>
+                    <input id="subtitleScheduleTimeInput" name="subtitleScheduleTime" type="time">
+                  </label>
+                  <label class="schedule-weekly-field">
+                    <span>Weekday</span>
+                    <select id="subtitleScheduleDayOfWeekInput" name="subtitleScheduleDayOfWeek">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </label>
+                  <label class="schedule-monthly-field">
+                    <span>Month Day</span>
+                    <input id="subtitleScheduleDayOfMonthInput" name="subtitleScheduleDayOfMonth" type="number" min="1" max="31" step="1">
+                  </label>
+                </div>
+              </div>
             </div>
             <div class="settings-section">
               <div class="section-heading">
@@ -204,6 +344,51 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="settings-section">
+              <div class="section-heading">
+                <h2>Subtitle Preferences</h2>
+                <span class="section-status">Sidecars</span>
+              </div>
+              <div class="field-grid subtitle-preferences-grid">
+                <div class="preference-field">
+                  <span>Languages</span>
+                  <div class="multi-select" data-preference="subtitleLanguages">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleLanguagesInput" name="preferredSubtitleLanguages" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Formats / Extensions</span>
+                  <div class="multi-select" data-preference="subtitleFormats">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleFormatsInput" name="preferredSubtitleFormats" type="hidden">
+                  </div>
+                </div>
+                <div class="preference-field">
+                  <span>Flags</span>
+                  <div class="multi-select" data-preference="subtitleFlags">
+                    <button class="multi-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="multi-select-summary">No scan values</span>
+                      <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="multi-select-menu" role="listbox" aria-multiselectable="true"></div>
+                    <input id="preferredSubtitleFlagsInput" name="preferredSubtitleFlags" type="hidden">
+                  </div>
+                </div>
+              </div>
+              <label class="toggle-row">
+                <input id="deleteNonPreferredSubtitleLanguagesInput" name="deleteNonPreferredSubtitleLanguages" type="checkbox">
+                <span>Delete non-preferred languages</span>
+              </label>
             </div>
             <div class="settings-section">
               <div class="section-heading">
@@ -262,7 +447,7 @@
       <form method="dialog">
         <header>
           <h2 id="deleteDialogTitle">Delete File</h2>
-          <button class="icon-button ghost" value="cancel" title="Close">
+          <button id="deleteCloseButton" class="icon-button ghost" value="cancel" title="Close">
             <i data-lucide="x"></i>
           </button>
         </header>
@@ -272,8 +457,24 @@
           <span id="deleteConfirmLabel">Type DELETE to confirm</span>
           <input id="deleteConfirmInput" autocomplete="off" placeholder="DELETE">
         </label>
+        <div id="deleteProgressPanel" class="scan-progress-panel delete-progress-panel is-hidden" role="status" aria-live="polite">
+          <div class="scan-progress-header">
+            <span id="deleteProgressText">Queued</span>
+            <span id="deleteProgressMeta">0 / 0</span>
+          </div>
+          <div class="scan-progress-track" aria-hidden="true">
+            <div id="deleteProgressFill" class="scan-progress-fill"></div>
+          </div>
+        </div>
+        <div id="deleteLogPanel" class="delete-log-panel is-hidden" aria-live="polite">
+          <div class="delete-log-header">
+            <span>Recent failures</span>
+            <span id="deleteLogCount">0 failed</span>
+          </div>
+          <div id="deleteLogEntries" class="delete-log-entries"></div>
+        </div>
         <menu>
-          <button class="secondary-button" value="cancel">Cancel</button>
+          <button id="deleteCancelButton" class="secondary-button" value="cancel">Cancel</button>
           <button id="confirmDeleteButton" class="danger-button" value="default">
             <i data-lucide="trash-2"></i>
             <span>Delete</span>
