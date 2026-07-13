@@ -4,12 +4,18 @@ const state = {
   libraries: [],
   selectedLibraries: new Set(),
   scan: null,
+  subtitleScan: null,
   groupSelections: new Map(),
+  subtitleGroupSelections: new Map(),
   selectionMode: "manual",
   scanJob: null,
   scanStartedAt: null,
   scanPollTimer: null,
   scanElapsedTimer: null,
+  subtitleScanJob: null,
+  subtitleScanStartedAt: null,
+  subtitleScanPollTimer: null,
+  subtitleScanElapsedTimer: null,
   activeDelete: null,
   preferenceOptions: {
     containers: [],
@@ -56,22 +62,37 @@ const elements = {
   refreshButton: document.querySelector("#refreshButton"),
   logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
+  subtitleLibraryStrip: document.querySelector("#subtitleLibraryStrip"),
   scanButton: document.querySelector("#scanButton"),
+  subtitleScanButton: document.querySelector("#subtitleScanButton"),
   reviewModeSelect: document.querySelector("#reviewModeSelect"),
   autoSelectButton: document.querySelector("#autoSelectButton"),
+  subtitleAutoSelectButton: document.querySelector("#subtitleAutoSelectButton"),
   deleteRejectedButton: document.querySelector("#deleteRejectedButton"),
+  deleteRejectedSubtitlesButton: document.querySelector("#deleteRejectedSubtitlesButton"),
   scanProgressPanel: document.querySelector("#scanProgressPanel"),
   scanProgressText: document.querySelector("#scanProgressText"),
   scanProgressMeta: document.querySelector("#scanProgressMeta"),
   scanProgressFill: document.querySelector("#scanProgressFill"),
+  subtitleScanProgressPanel: document.querySelector("#subtitleScanProgressPanel"),
+  subtitleScanProgressText: document.querySelector("#subtitleScanProgressText"),
+  subtitleScanProgressMeta: document.querySelector("#subtitleScanProgressMeta"),
+  subtitleScanProgressFill: document.querySelector("#subtitleScanProgressFill"),
   searchInput: document.querySelector("#searchInput"),
+  subtitleSearchInput: document.querySelector("#subtitleSearchInput"),
   groupCount: document.querySelector("#groupCount"),
   fileCount: document.querySelector("#fileCount"),
   reclaimCount: document.querySelector("#reclaimCount"),
   libraryCount: document.querySelector("#libraryCount"),
+  subtitleGroupCount: document.querySelector("#subtitleGroupCount"),
+  subtitleFileCount: document.querySelector("#subtitleFileCount"),
+  subtitleRejectedCount: document.querySelector("#subtitleRejectedCount"),
+  subtitleLibraryCount: document.querySelector("#subtitleLibraryCount"),
   messageArea: document.querySelector("#messageArea"),
+  subtitleMessageArea: document.querySelector("#subtitleMessageArea"),
   settingsMessageArea: document.querySelector("#settingsMessageArea"),
   duplicatesList: document.querySelector("#duplicatesList"),
+  subtitlesList: document.querySelector("#subtitlesList"),
   settingsForm: document.querySelector("#settingsForm"),
   plexUrlInput: document.querySelector("#plexUrlInput"),
   plexTokenInput: document.querySelector("#plexTokenInput"),
@@ -142,6 +163,12 @@ function formatDuration(ms) {
 
 function setMessage(message, type = "") {
   elements.messageArea.innerHTML = message
+    ? `<div class="message ${type}">${escapeHtml(message)}</div>`
+    : "";
+}
+
+function setSubtitleMessage(message, type = "") {
+  elements.subtitleMessageArea.innerHTML = message
     ? `<div class="message ${type}">${escapeHtml(message)}</div>`
     : "";
 }
@@ -297,6 +324,15 @@ function renderScanProgress(job, startedAt = state.scanStartedAt) {
   elements.scanProgressFill.style.width = `${progress}%`;
 }
 
+function renderSubtitleScanProgress(job, startedAt = state.subtitleScanStartedAt) {
+  const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
+  const elapsed = startedAt ? Date.now() - startedAt : 0;
+  elements.subtitleScanProgressPanel.classList.remove("is-hidden");
+  elements.subtitleScanProgressText.textContent = job?.message || "Scanning";
+  elements.subtitleScanProgressMeta.textContent = `${Math.round(progress)}% | ${formatElapsed(elapsed)}`;
+  elements.subtitleScanProgressFill.style.width = `${progress}%`;
+}
+
 function clearScanTimers() {
   if (state.scanPollTimer) {
     clearTimeout(state.scanPollTimer);
@@ -305,6 +341,17 @@ function clearScanTimers() {
   if (state.scanElapsedTimer) {
     clearInterval(state.scanElapsedTimer);
     state.scanElapsedTimer = null;
+  }
+}
+
+function clearSubtitleScanTimers() {
+  if (state.subtitleScanPollTimer) {
+    clearTimeout(state.subtitleScanPollTimer);
+    state.subtitleScanPollTimer = null;
+  }
+  if (state.subtitleScanElapsedTimer) {
+    clearInterval(state.subtitleScanElapsedTimer);
+    state.subtitleScanElapsedTimer = null;
   }
 }
 
@@ -406,13 +453,14 @@ function plexFormPayload(includeAuth = false) {
   return payload;
 }
 
-function renderLibraries() {
+function renderLibraryStrip(strip) {
+  if (!strip) return;
   if (!state.libraries.length) {
-    elements.libraryStrip.innerHTML = `<span class="pill">No libraries</span>`;
+    strip.innerHTML = `<span class="pill">No libraries</span>`;
     return;
   }
 
-  elements.libraryStrip.innerHTML = state.libraries
+  strip.innerHTML = state.libraries
     .filter((library) => ["movie", "show", "video"].includes(library.type))
     .map((library) => {
       const checked = state.selectedLibraries.has(String(library.key)) ? "checked" : "";
@@ -425,12 +473,18 @@ function renderLibraries() {
     })
     .join("");
 
-  elements.libraryStrip.querySelectorAll("input").forEach((input) => {
+  strip.querySelectorAll("input").forEach((input) => {
     input.addEventListener("change", () => {
       if (input.checked) state.selectedLibraries.add(input.value);
       else state.selectedLibraries.delete(input.value);
+      renderLibraries();
     });
   });
+}
+
+function renderLibraries() {
+  renderLibraryStrip(elements.libraryStrip);
+  renderLibraryStrip(elements.subtitleLibraryStrip);
 }
 
 function renderStats(stats = {}) {
@@ -438,6 +492,13 @@ function renderStats(stats = {}) {
   elements.fileCount.textContent = stats.files || 0;
   elements.reclaimCount.textContent = formatBytes(stats.reclaimableBytes || 0);
   elements.libraryCount.textContent = stats.libraries || state.libraries.length || 0;
+}
+
+function renderSubtitleStats(stats = {}) {
+  elements.subtitleGroupCount.textContent = stats.groups || 0;
+  elements.subtitleFileCount.textContent = stats.sidecars || 0;
+  elements.subtitleRejectedCount.textContent = rejectedSubtitleTargets().length || stats.duplicateSidecars || 0;
+  elements.subtitleLibraryCount.textContent = stats.libraries || state.libraries.length || 0;
 }
 
 function initializeGroupSelections() {
@@ -450,12 +511,24 @@ function initializeGroupSelections() {
   }
 }
 
+function initializeSubtitleSelections() {
+  state.subtitleGroupSelections = new Map();
+}
+
 function autoSelectSuggested() {
   for (const group of state.scan?.groups || []) {
     const suggested = group.suggestedFileId || group.bestFileId;
     if (suggested) state.groupSelections.set(group.id, suggested);
   }
   renderGroups();
+}
+
+function autoSelectSuggestedSubtitles() {
+  for (const group of state.subtitleScan?.groups || []) {
+    const suggested = group.suggestedSubtitleId;
+    if (suggested) state.subtitleGroupSelections.set(group.id, suggested);
+  }
+  renderSubtitleGroups();
 }
 
 function setReviewMode(mode) {
@@ -538,6 +611,27 @@ function rejectedMediaTargets() {
   return [...targets.values()];
 }
 
+function subtitleTargetKey(subtitle) {
+  if (!subtitle?.streamId) return "";
+  return `${subtitle.streamId}:${subtitle.extension || "srt"}`;
+}
+
+function rejectedSubtitleTargets() {
+  const targets = new Map();
+  for (const group of state.subtitleScan?.groups || []) {
+    const keeperId = state.subtitleGroupSelections.get(group.id);
+    if (!keeperId) continue;
+
+    for (const subtitle of group.subtitles || []) {
+      if (subtitle.id === keeperId) continue;
+      const target = subtitleTargetKey(subtitle);
+      if (target) targets.set(target, subtitle);
+    }
+  }
+
+  return [...targets.values()];
+}
+
 function updateBulkDeleteButton() {
   const targets = rejectedMediaTargets();
   const isAuto = state.selectionMode === "auto";
@@ -551,6 +645,20 @@ function updateBulkDeleteButton() {
     : targets.length
       ? `Delete ${targets.length} media versions not selected to keep`
       : "No rejected media versions to delete";
+}
+
+function updateBulkSubtitleDeleteButton() {
+  const targets = rejectedSubtitleTargets();
+  elements.deleteRejectedSubtitlesButton.disabled = !state.config?.allowDeletes || !targets.length;
+  elements.deleteRejectedSubtitlesButton.querySelector("span").textContent = targets.length
+    ? `Delete ${targets.length} Rejected`
+    : "Delete Rejected";
+  elements.deleteRejectedSubtitlesButton.title = !state.config?.allowDeletes
+    ? "Deletes disabled in Settings"
+    : targets.length
+      ? `Delete ${targets.length} subtitle sidecars not selected to keep`
+      : "No rejected subtitle sidecars to delete";
+  renderSubtitleStats(state.subtitleScan?.stats || {});
 }
 
 function renderGroups() {
@@ -638,6 +746,152 @@ function renderGroups() {
   icons();
 }
 
+function subtitleFlagsLabel(subtitle) {
+  return [
+    subtitle.forced ? "Forced" : "",
+    subtitle.hearingImpaired ? "SDH/CC" : "",
+    subtitle.default ? "Default" : "",
+    subtitle.selected ? "Selected" : "",
+    subtitle.canAutoSync ? "Auto-sync" : ""
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function subtitleFormatLabel(subtitle) {
+  return [
+    subtitle.extension ? subtitle.extension.toUpperCase() : "",
+    subtitle.source,
+    subtitle.streamId ? `ID ${subtitle.streamId}` : ""
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function subtitleKeepButton(group, subtitle, isSelectedKeep) {
+  const title = isSelectedKeep ? "Selected keeper" : "Select keeper";
+  return `
+    <button class="icon-button keep-subtitle-button ${isSelectedKeep ? "selected" : ""}" data-group-id="${escapeHtml(group.id)}" data-subtitle-id="${escapeHtml(subtitle.id)}" title="${title}">
+      <i data-lucide="${isSelectedKeep ? "check-circle-2" : "circle"}"></i>
+    </button>
+  `;
+}
+
+function subtitleDeleteButton(subtitle, selectedSubtitleId) {
+  const isSelectedKeep = subtitle.id === selectedSubtitleId;
+  const disabled = !state.config?.allowDeletes || !selectedSubtitleId || isSelectedKeep ? "disabled" : "";
+  const title = !state.config?.allowDeletes
+    ? "Deletes disabled"
+    : !selectedSubtitleId
+      ? "Choose keeper first"
+      : isSelectedKeep
+        ? "Selected keeper"
+        : "Delete";
+  return `
+    <button class="icon-button delete-subtitle-button" data-subtitle-id="${escapeHtml(subtitle.id)}" ${disabled} title="${title}">
+      <i data-lucide="trash-2"></i>
+    </button>
+  `;
+}
+
+function renderSubtitleGroups() {
+  updateBulkSubtitleDeleteButton();
+  const query = elements.subtitleSearchInput.value.trim().toLowerCase();
+  const groups = (state.subtitleScan?.groups || []).filter((group) => {
+    if (!query) return true;
+    return [
+      group.title,
+      group.subtitle,
+      group.libraryTitle,
+      group.partFile,
+      group.language,
+      ...(group.subtitles || []).flatMap((subtitle) => [
+        subtitle.displayTitle,
+        subtitle.streamTitle,
+        subtitle.sidecarPath,
+        subtitle.streamKey,
+        subtitle.extension,
+        subtitle.source
+      ])
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+
+  if (!groups.length) {
+    elements.subtitlesList.innerHTML = `<div class="message">No duplicate sidecar subtitles found.</div>`;
+    icons();
+    return;
+  }
+
+  elements.subtitlesList.innerHTML = groups
+    .map((group) => {
+      const selectedSubtitleId = state.subtitleGroupSelections.get(group.id) || "";
+      const rows = (group.subtitles || [])
+        .map((subtitle) => {
+          const isSuggested = subtitle.id === group.suggestedSubtitleId;
+          const isSelectedKeep = subtitle.id === selectedSubtitleId;
+          const path = subtitle.sidecarPath || subtitle.streamKey || group.partFile;
+          return `
+            <div class="file-row subtitle-row ${isSelectedKeep ? "selected-keep" : ""} ${isSuggested ? "suggested-file" : ""}">
+              <div class="score ${isSuggested ? "suggested" : ""}">${subtitle.score?.value || 0}</div>
+              <div class="file-main">
+                <div class="file-name">
+                  <span>${escapeHtml(subtitle.displayTitle || subtitle.streamTitle || subtitle.language || "Subtitle")}</span>
+                  ${isSuggested ? '<span class="suggested-badge">Suggested</span>' : ""}
+                  ${isSelectedKeep ? '<span class="keep-badge">Keep</span>' : ""}
+                </div>
+                <div class="file-path">${escapeHtml(path)}</div>
+              </div>
+              <div class="file-detail">
+                <strong>${escapeHtml(subtitle.language || "Unknown")}</strong>
+                <span>${escapeHtml(subtitleFlagsLabel(subtitle) || "Standard")}</span>
+              </div>
+              <div class="file-detail">
+                <strong>${escapeHtml(subtitleFormatLabel(subtitle))}</strong>
+                <span>${escapeHtml((subtitle.score?.reasons || []).join(" | "))}</span>
+              </div>
+              <div class="row-actions">
+                ${subtitleKeepButton(group, subtitle, isSelectedKeep)}
+                ${subtitleDeleteButton(subtitle, selectedSubtitleId)}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      return `
+        <article class="duplicate-group">
+          <header class="group-header">
+            <div class="group-title">
+              <h2>${escapeHtml(group.title)}</h2>
+              <p>${escapeHtml([group.libraryTitle, group.subtitle, group.partFileName].filter(Boolean).join(" | "))}</p>
+            </div>
+            <div class="group-meta">
+              <span class="pill">${escapeHtml(group.reason)}</span>
+              <span class="pill">${group.subtitles.length} sidecars</span>
+              <span class="pill">${selectedSubtitleId ? "Keeper selected" : "Choose keeper"}</span>
+            </div>
+          </header>
+          ${rows}
+        </article>
+      `;
+    })
+    .join("");
+
+  elements.subtitlesList.querySelectorAll(".keep-subtitle-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.subtitleGroupSelections.set(button.dataset.groupId, button.dataset.subtitleId);
+      renderSubtitleGroups();
+    });
+  });
+  elements.subtitlesList.querySelectorAll(".delete-subtitle-button").forEach((button) => {
+    button.addEventListener("click", () => openSubtitleDelete(button.dataset.subtitleId));
+  });
+  icons();
+}
+
 function findFile(fileId) {
   for (const group of state.scan?.groups || []) {
     const file = group.files.find((candidate) => candidate.id === fileId);
@@ -646,10 +900,18 @@ function findFile(fileId) {
   return null;
 }
 
+function findSubtitle(subtitleId) {
+  for (const group of state.subtitleScan?.groups || []) {
+    const subtitle = group.subtitles.find((candidate) => candidate.id === subtitleId);
+    if (subtitle) return subtitle;
+  }
+  return null;
+}
+
 function openDelete(fileId) {
   const file = findFile(fileId);
   if (!file) return;
-  state.activeDelete = { mode: "single", targets: [file] };
+  state.activeDelete = { kind: "media", mode: "single", targets: [file] };
   elements.deleteDialogTitle.textContent = "Delete File";
   elements.deleteFileName.textContent = file.fileName || file.file;
   elements.deleteFilePath.textContent = file.file;
@@ -665,12 +927,43 @@ function openBulkDelete() {
   const targets = rejectedMediaTargets();
   if (!targets.length || !state.config?.allowDeletes) return;
 
-  state.activeDelete = { mode: "bulk", targets };
+  state.activeDelete = { kind: "media", mode: "bulk", targets };
   elements.deleteDialogTitle.textContent = "Delete Rejected Versions";
   elements.deleteFileName.textContent = `${targets.length} media versions will be permanently deleted`;
   elements.deleteFilePath.textContent = `${formatBytes(
     targets.reduce((sum, file) => sum + Number(file.size || 0), 0)
   )} across all scanned duplicate groups`;
+  elements.deleteConfirmLabel.textContent = "Type DELETE ALL to confirm";
+  elements.deleteConfirmInput.placeholder = "DELETE ALL";
+  elements.deleteConfirmInput.value = "";
+  elements.deleteConfirmInput.setCustomValidity("");
+  elements.deleteDialog.showModal();
+  elements.deleteConfirmInput.focus();
+}
+
+function openSubtitleDelete(subtitleId) {
+  const subtitle = findSubtitle(subtitleId);
+  if (!subtitle) return;
+  state.activeDelete = { kind: "subtitle", mode: "single", targets: [subtitle] };
+  elements.deleteDialogTitle.textContent = "Delete Subtitle";
+  elements.deleteFileName.textContent = subtitle.displayTitle || subtitle.streamTitle || "Subtitle sidecar";
+  elements.deleteFilePath.textContent = subtitle.sidecarPath || subtitle.streamKey || subtitle.partFile;
+  elements.deleteConfirmLabel.textContent = "Type DELETE to confirm";
+  elements.deleteConfirmInput.placeholder = "DELETE";
+  elements.deleteConfirmInput.value = "";
+  elements.deleteConfirmInput.setCustomValidity("");
+  elements.deleteDialog.showModal();
+  elements.deleteConfirmInput.focus();
+}
+
+function openBulkSubtitleDelete() {
+  const targets = rejectedSubtitleTargets();
+  if (!targets.length || !state.config?.allowDeletes) return;
+
+  state.activeDelete = { kind: "subtitle", mode: "bulk", targets };
+  elements.deleteDialogTitle.textContent = "Delete Rejected Subtitles";
+  elements.deleteFileName.textContent = `${targets.length} subtitle sidecars will be permanently deleted`;
+  elements.deleteFilePath.textContent = `${new Set(targets.map((subtitle) => subtitle.partFile)).size} media files across scanned duplicate subtitle groups`;
   elements.deleteConfirmLabel.textContent = "Type DELETE ALL to confirm";
   elements.deleteConfirmInput.placeholder = "DELETE ALL";
   elements.deleteConfirmInput.value = "";
@@ -775,6 +1068,65 @@ async function scan() {
   }
 }
 
+async function subtitleScan() {
+  clearSubtitleScanTimers();
+  setBusy(elements.subtitleScanButton, true, "Scanning");
+  setSubtitleMessage("");
+  state.subtitleScanStartedAt = Date.now();
+  state.subtitleScanJob = { status: "queued", progress: 0, message: "Starting scan" };
+  renderSubtitleScanProgress(state.subtitleScanJob);
+  state.subtitleScanElapsedTimer = setInterval(() => {
+    if (state.subtitleScanJob) renderSubtitleScanProgress(state.subtitleScanJob);
+  }, 1000);
+
+  try {
+    state.subtitleScanJob = await api("/api/subtitle-scan", {
+      method: "POST",
+      body: JSON.stringify({
+        libraryKeys: [...state.selectedLibraries]
+      })
+    });
+    renderSubtitleScanProgress(state.subtitleScanJob);
+
+    while (["queued", "running"].includes(state.subtitleScanJob.status)) {
+      await new Promise((resolve) => {
+        state.subtitleScanPollTimer = setTimeout(resolve, 700);
+      });
+      state.subtitleScanJob = await api(`/api/subtitle-scan/${state.subtitleScanJob.id}`);
+      renderSubtitleScanProgress(state.subtitleScanJob);
+    }
+
+    if (state.subtitleScanJob.status === "failed") {
+      throw new Error(state.subtitleScanJob.error || "Subtitle scan failed.");
+    }
+
+    state.subtitleScan = state.subtitleScanJob.result;
+    initializeSubtitleSelections();
+    renderSubtitleStats(state.subtitleScan.stats);
+    renderSubtitleGroups();
+    if (state.subtitleScan.errors?.length) {
+      setSubtitleMessage(
+        state.subtitleScan.errors.map((error) => `${error.library}: ${error.message}`).join(" | "),
+        "error"
+      );
+    }
+  } catch (error) {
+    state.subtitleScanJob = {
+      ...(state.subtitleScanJob || {}),
+      status: "failed",
+      progress: 100,
+      message: "Subtitle scan failed",
+      error: error.message
+    };
+    renderSubtitleScanProgress(state.subtitleScanJob);
+    setSubtitleMessage(error.message, "error");
+  } finally {
+    clearSubtitleScanTimers();
+    if (state.subtitleScanJob) renderSubtitleScanProgress(state.subtitleScanJob);
+    setBusy(elements.subtitleScanButton, false, "Scan");
+  }
+}
+
 async function saveSettings(event) {
   event.preventDefault();
   setSettingsMessage("");
@@ -860,6 +1212,7 @@ async function deleteActiveFile(event) {
   if (!state.activeDelete) return;
 
   const bulk = state.activeDelete.mode === "bulk";
+  const kind = state.activeDelete.kind || "media";
   const expectedConfirmation = bulk ? "DELETE ALL" : "DELETE";
   if (elements.deleteConfirmInput.value !== expectedConfirmation) {
     elements.deleteConfirmInput.setCustomValidity(`Type ${expectedConfirmation} to confirm.`);
@@ -870,40 +1223,56 @@ async function deleteActiveFile(event) {
 
   elements.confirmDeleteButton.disabled = true;
   elements.deleteRejectedButton.disabled = true;
+  elements.deleteRejectedSubtitlesButton.disabled = true;
   const failures = [];
   let deleted = 0;
   try {
-    for (const file of state.activeDelete.targets) {
+    for (const target of state.activeDelete.targets) {
       try {
-        await api("/api/delete", {
-          method: "POST",
-          body: JSON.stringify({
-            ratingKey: file.ratingKey,
-            mediaId: file.mediaId,
-            confirmText: "DELETE"
-          })
-        });
+        if (kind === "subtitle") {
+          await api("/api/subtitle-delete", {
+            method: "POST",
+            body: JSON.stringify({
+              streamId: target.streamId,
+              extension: target.extension,
+              confirmText: "DELETE"
+            })
+          });
+        } else {
+          await api("/api/delete", {
+            method: "POST",
+            body: JSON.stringify({
+              ratingKey: target.ratingKey,
+              mediaId: target.mediaId,
+              confirmText: "DELETE"
+            })
+          });
+        }
         deleted += 1;
       } catch (error) {
-        failures.push({ file, error });
+        failures.push({ target, error });
         if (!bulk) throw error;
       }
     }
     elements.deleteDialog.close();
-    await scan();
+    if (kind === "subtitle") await subtitleScan();
+    else await scan();
     if (bulk && failures.length) {
-      setMessage(
-        `Deleted ${deleted} media versions; ${failures.length} failed. First error: ${failures[0].error.message}`,
-        "error"
-      );
+      const message = `Deleted ${deleted} ${kind === "subtitle" ? "subtitle sidecars" : "media versions"}; ${failures.length} failed. First error: ${failures[0].error.message}`;
+      if (kind === "subtitle") setSubtitleMessage(message, "error");
+      else setMessage(message, "error");
     } else if (bulk) {
-      setMessage(`Deleted ${deleted} rejected media versions.`, "success");
+      const message = `Deleted ${deleted} rejected ${kind === "subtitle" ? "subtitle sidecars" : "media versions"}.`;
+      if (kind === "subtitle") setSubtitleMessage(message, "success");
+      else setMessage(message, "success");
     }
   } catch (error) {
-    setMessage(error.message, "error");
+    if (kind === "subtitle") setSubtitleMessage(error.message, "error");
+    else setMessage(error.message, "error");
   } finally {
     elements.confirmDeleteButton.disabled = false;
     updateBulkDeleteButton();
+    updateBulkSubtitleDeleteButton();
   }
 }
 
@@ -914,8 +1283,11 @@ function setupNavigation() {
       document.querySelectorAll(".view").forEach((view) => view.classList.remove("active-view"));
       button.classList.add("active");
       document.querySelector(`#${button.dataset.view}View`).classList.add("active-view");
-      elements.pageTitle.textContent =
-        button.dataset.view === "settings" ? "Settings" : "Duplicates";
+      elements.pageTitle.textContent = {
+        duplicates: "Duplicates",
+        subtitles: "Subtitles",
+        settings: "Settings"
+      }[button.dataset.view] || "Deduplarr";
     });
   });
 }
@@ -957,10 +1329,14 @@ function setupEvents() {
   elements.logoutButton.addEventListener("click", logout);
   elements.refreshButton.addEventListener("click", refreshConnection);
   elements.scanButton.addEventListener("click", scan);
+  elements.subtitleScanButton.addEventListener("click", subtitleScan);
   elements.reviewModeSelect.addEventListener("change", () => setReviewMode(elements.reviewModeSelect.value));
   elements.autoSelectButton.addEventListener("click", autoSelectSuggested);
+  elements.subtitleAutoSelectButton.addEventListener("click", autoSelectSuggestedSubtitles);
   elements.deleteRejectedButton.addEventListener("click", openBulkDelete);
+  elements.deleteRejectedSubtitlesButton.addEventListener("click", openBulkSubtitleDelete);
   elements.searchInput.addEventListener("input", renderGroups);
+  elements.subtitleSearchInput.addEventListener("input", renderSubtitleGroups);
   elements.selectionModeInput.addEventListener("change", () => setReviewMode(elements.selectionModeInput.value));
   elements.settingsForm.addEventListener("submit", saveSettings);
   elements.testButton.addEventListener("click", testPlexConnection);
@@ -973,6 +1349,8 @@ async function boot() {
   setupPreferenceControls();
   setupEvents();
   renderStats();
+  renderSubtitleStats();
+  updateBulkSubtitleDeleteButton();
   try {
     const session = await api("/api/session");
     if (session.authenticated) {

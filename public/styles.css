@@ -450,6 +450,10 @@ button {
   border-bottom: 1px solid rgba(44, 54, 68, 0.7);
 }
 
+.subtitle-row {
+  grid-template-columns: 78px minmax(220px, 1.8fr) minmax(150px, 0.8fr) minmax(180px, 1fr) 92px;
+}
+
 .file-row.selected-keep {
   background: rgba(85, 179, 122, 0.08);
 }
@@ -552,6 +556,12 @@ button {
 }
 
 .keep-file-button.selected {
+  border-color: rgba(85, 179, 122, 0.6);
+  background: rgba(85, 179, 122, 0.14);
+  color: #dff7e8;
+}
+
+.keep-subtitle-button.selected {
   border-color: rgba(85, 179, 122, 0.6);
   background: rgba(85, 179, 122, 0.14);
   color: #dff7e8;
@@ -950,6 +960,10 @@ svg {
   .file-row {
     grid-template-columns: 64px minmax(0, 1fr) 92px;
     align-items: start;
+  }
+
+  .subtitle-row {
+    grid-template-columns: 64px minmax(0, 1fr) 92px;
   }
 
   .file-detail,

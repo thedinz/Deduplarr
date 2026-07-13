@@ -40,6 +40,91 @@ function fileNameFromPath(filePath) {
   return text(filePath).split(/[\\/]/).pop() || text(filePath);
 }
 
+function booleanValue(value) {
+  if (value === true || value === 1) return true;
+  return ["1", "true", "yes"].includes(text(value).trim().toLowerCase());
+}
+
+function cleanExtension(value, fallback = "") {
+  const aliases = {
+    subrip: "srt",
+    webvtt: "vtt"
+  };
+  const cleaned = text(value)
+    .trim()
+    .replace(/^\./, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return aliases[cleaned] || cleaned || fallback;
+}
+
+function streamIdFromKey(stream) {
+  const key = text(stream?.key);
+  const match = key.match(/\/library\/streams\/([^/?#]+)/i);
+  if (!match) return "";
+  return decodeURIComponent(match[1]).replace(/\.[a-z0-9]+$/i, "");
+}
+
+function subtitleExtension(stream) {
+  const keyExtension = extensionFromPath(text(stream?.key).split(/[?#]/)[0]);
+  return cleanExtension(
+    keyExtension ||
+      stream?.format ||
+      stream?.codec ||
+      stream?.container ||
+      stream?.ext,
+    "srt"
+  );
+}
+
+function subtitleSource(stream) {
+  const fields = [
+    stream?.source,
+    stream?.sourceTitle,
+    stream?.providerTitle,
+    stream?.displayTitle,
+    stream?.extendedDisplayTitle,
+    stream?.title
+  ]
+    .map((value) => text(value).toLowerCase())
+    .filter(Boolean);
+  const combined = fields.join(" ");
+
+  if (combined.includes("embedded")) return "Embedded";
+  if (combined.includes("sidecar") || combined.includes("external")) return "Sidecar";
+  if (combined.includes("download")) return "Downloaded";
+  if (text(stream?.key).includes("/library/streams/")) return "Sidecar";
+  return "Embedded";
+}
+
+function isSidecarSubtitle(stream) {
+  return (
+    number(stream?.streamType || stream?.type) === 3 &&
+    subtitleSource(stream) === "Sidecar" &&
+    text(stream?.key).includes("/library/streams/")
+  );
+}
+
+function normalizeLanguageCode(stream) {
+  return text(stream?.languageCode || stream?.languageTag || stream?.language)
+    .trim()
+    .toLowerCase() || "unknown";
+}
+
+function subtitleLanguageLabel(stream) {
+  return text(stream?.language || stream?.languageCode || stream?.languageTag, "Unknown");
+}
+
+function subtitleVariantLabel(record) {
+  return [
+    record.language,
+    record.forced ? "Forced" : "",
+    record.hearingImpaired ? "SDH/CC" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function normalizeBaseUrl(input) {
   const trimmed = text(input).trim();
   if (!trimmed) throw new Error("Plex URL is required.");
@@ -158,6 +243,133 @@ function duplicateReason(item, files, cameFromDuplicateFilter) {
   if (mediaCount > 1) return `${mediaCount} media versions`;
   if (cameFromDuplicateFilter && files.length > 1) return `${files.length} file parts`;
   return "multiple files";
+}
+
+function subtitleScore(record) {
+  const reasons = [];
+  let value = 0;
+
+  if (record.selected) {
+    value += 40;
+    reasons.push("Selected in Plex");
+  }
+  if (record.default) {
+    value += 25;
+    reasons.push("Default");
+  }
+  if (record.extension === "srt") {
+    value += 10;
+    reasons.push("SRT");
+  } else if (record.extension === "vtt") {
+    value += 8;
+    reasons.push("VTT");
+  } else if (record.extension) {
+    value += 4;
+    reasons.push(record.extension.toUpperCase());
+  }
+  if (record.title && !/unknown/i.test(record.title)) {
+    value += 5;
+    reasons.push("Named");
+  }
+  if (record.canAutoSync) {
+    value += 2;
+    reasons.push("Can auto-sync");
+  }
+
+  return {
+    value,
+    reasons: reasons.length ? reasons : ["Sidecar subtitle"]
+  };
+}
+
+function subtitleGroupingKey(record) {
+  return [
+    record.ratingKey,
+    record.mediaId || record.mediaIndex,
+    record.partId || record.partIndex,
+    record.languageCode,
+    record.forced ? "forced" : "full",
+    record.hearingImpaired ? "sdh" : "standard"
+  ].join(":");
+}
+
+function subtitleReason(records) {
+  const sample = records[0] || {};
+  return `${records.length} ${subtitleVariantLabel(sample).toLowerCase()} sidecars`;
+}
+
+function flattenSidecarSubtitles(item, library) {
+  const mediaItems = asArray(item.Media);
+  const records = [];
+  let ignoredNonSidecar = 0;
+  let scannedSubtitles = 0;
+
+  mediaItems.forEach((media, mediaIndex) => {
+    const parts = asArray(media.Part);
+
+    parts.forEach((part, partIndex) => {
+      const streams = streamGroups(part).subtitles;
+      scannedSubtitles += streams.length;
+
+      streams.forEach((stream, streamIndex) => {
+        if (!isSidecarSubtitle(stream)) {
+          ignoredNonSidecar += 1;
+          return;
+        }
+
+        const streamId = text(streamIdFromKey(stream) || stream.id || "");
+        const extension = subtitleExtension(stream);
+        const record = {
+          id: [
+            item.ratingKey,
+            media.id || mediaIndex,
+            part.id || partIndex,
+            streamId || streamIndex
+          ].join(":"),
+          streamId,
+          streamKey: text(stream.key),
+          libraryKey: text(library.key),
+          libraryTitle: library.title,
+          type: item.type,
+          ratingKey: text(item.ratingKey),
+          metadataKey: item.key || `/library/metadata/${item.ratingKey}`,
+          mediaId: text(media.id || ""),
+          mediaIndex,
+          partId: text(part.id || ""),
+          partIndex,
+          partKey: text(part.key || ""),
+          partFile: text(part.file),
+          partFileName: fileNameFromPath(part.file),
+          title: groupTitle(item),
+          subtitle: groupSubtitle(item),
+          streamTitle: text(stream.title || stream.displayTitle || stream.extendedDisplayTitle),
+          displayTitle: text(stream.displayTitle || stream.extendedDisplayTitle || stream.title),
+          language: subtitleLanguageLabel(stream),
+          languageCode: normalizeLanguageCode(stream),
+          extension,
+          codec: cleanExtension(stream.codec || stream.format || extension, extension),
+          source: subtitleSource(stream),
+          sidecarPath: text(stream.file || stream.path || stream.location),
+          forced: booleanValue(stream.forced),
+          hearingImpaired: booleanValue(stream.hearingImpaired || stream.sdh || stream.cc),
+          default: booleanValue(stream.default),
+          selected: booleanValue(stream.selected),
+          canAutoSync: booleanValue(stream.canAutoSync),
+          index: number(stream.index, streamIndex),
+          raw: stream
+        };
+
+        record.score = subtitleScore(record);
+        records.push(record);
+      });
+    });
+  });
+
+  return {
+    records: records.sort((a, b) => b.score.value - a.score.value),
+    scannedSubtitles,
+    ignoredNonSidecar
+  };
 }
 
 async function mapLimit(items, limit, mapper) {
@@ -438,6 +650,153 @@ export class PlexClient {
     };
   }
 
+  async subtitleDuplicates(libraryKeys = [], options = {}) {
+    const onProgress =
+      typeof options.onProgress === "function" ? options.onProgress : () => {};
+    const libraries = await this.libraries();
+    const selected = libraries.filter((library) => {
+      const supported = ["movie", "show", "video"].includes(library.type);
+      const requested =
+        libraryKeys.length === 0 || libraryKeys.includes(String(library.key));
+      return supported && requested;
+    });
+
+    const allGroups = [];
+    const errors = [];
+    let totalItems = 0;
+    let totalSubtitleStreams = 0;
+    let totalSidecars = 0;
+    let ignoredNonSidecar = 0;
+    const totalLibraries = Math.max(selected.length, 1);
+
+    onProgress({
+      progress: selected.length ? 5 : 100,
+      message: selected.length
+        ? `Found ${selected.length} supported libraries`
+        : "No supported libraries selected"
+    });
+
+    for (const [libraryIndex, library] of selected.entries()) {
+      let items = [];
+      const libraryBase = 5 + (libraryIndex / totalLibraries) * 90;
+      const librarySpan = 90 / totalLibraries;
+      const progressAt = (fraction) =>
+        Math.round(libraryBase + librarySpan * Math.max(0, Math.min(1, fraction)));
+
+      onProgress({
+        progress: progressAt(0.05),
+        message: `Reading subtitles in ${library.title}`
+      });
+
+      try {
+        items = await this.listSectionItems(library, false, ({ loaded, total }) => {
+          const fraction = total ? Math.min(loaded / total, 1) : 0.2;
+          onProgress({
+            progress: progressAt(0.05 + fraction * 0.25),
+            message: `Reading ${library.title}: ${loaded}/${total || "?"} items`
+          });
+        });
+      } catch (error) {
+        errors.push({
+          library: library.title,
+          message: error.message
+        });
+        continue;
+      }
+
+      totalItems += items.length;
+      let detailedCount = 0;
+      onProgress({
+        progress: progressAt(0.35),
+        message: `Inspecting ${items.length} items in ${library.title}`
+      });
+      const detailed = await mapLimit(items, 5, async (item) => {
+        try {
+          if (!item.ratingKey) return item;
+          return (await this.itemDetails(item.ratingKey)) || item;
+        } catch {
+          return item;
+        } finally {
+          detailedCount += 1;
+          const detailFraction = items.length ? detailedCount / items.length : 1;
+          onProgress({
+            progress: progressAt(0.35 + detailFraction * 0.45),
+            message: `Inspecting ${library.title}: ${detailedCount}/${items.length} items`
+          });
+        }
+      });
+
+      onProgress({
+        progress: progressAt(0.84),
+        message: `Grouping subtitle sidecars in ${library.title}`
+      });
+
+      for (const item of detailed) {
+        const { records, scannedSubtitles, ignoredNonSidecar: ignored } =
+          flattenSidecarSubtitles(item, library);
+        totalSubtitleStreams += scannedSubtitles;
+        totalSidecars += records.length;
+        ignoredNonSidecar += ignored;
+
+        const grouped = new Map();
+        for (const record of records) {
+          const key = subtitleGroupingKey(record);
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(record);
+        }
+
+        for (const recordsInGroup of grouped.values()) {
+          if (recordsInGroup.length < 2) continue;
+          const sample = recordsInGroup[0];
+          allGroups.push({
+            id: `${sample.libraryKey}:${sample.ratingKey}:${sample.mediaId || sample.mediaIndex}:${sample.partId || sample.partIndex}:${sample.languageCode}:${sample.forced ? "forced" : "full"}:${sample.hearingImpaired ? "sdh" : "standard"}`,
+            ratingKey: sample.ratingKey,
+            libraryKey: sample.libraryKey,
+            libraryTitle: sample.libraryTitle,
+            type: sample.type,
+            title: sample.title,
+            subtitle: sample.subtitle,
+            partFile: sample.partFile,
+            partFileName: sample.partFileName,
+            language: sample.language,
+            languageCode: sample.languageCode,
+            forced: sample.forced,
+            hearingImpaired: sample.hearingImpaired,
+            reason: subtitleReason(recordsInGroup),
+            suggestedSubtitleId: recordsInGroup[0]?.id || "",
+            subtitles: recordsInGroup
+          });
+        }
+      }
+
+      onProgress({
+        progress: progressAt(1),
+        message: `Finished ${library.title}`
+      });
+    }
+
+    onProgress({
+      progress: 100,
+      message: `Scan complete: ${allGroups.length} subtitle groups`
+    });
+    return {
+      groups: allGroups.sort((a, b) => a.title.localeCompare(b.title)),
+      stats: {
+        libraries: selected.length,
+        items: totalItems,
+        groups: allGroups.length,
+        subtitleStreams: totalSubtitleStreams,
+        sidecars: totalSidecars,
+        duplicateSidecars: allGroups.reduce(
+          (sum, group) => sum + Math.max((group.subtitles || []).length - 1, 0),
+          0
+        ),
+        ignoredNonSidecar
+      },
+      errors
+    };
+  }
+
   async deleteMedia(ratingKey, mediaId) {
     const metadataId = text(ratingKey).trim();
     const versionId = text(mediaId).trim();
@@ -446,6 +805,18 @@ export class PlexClient {
     }
 
     const target = `/library/metadata/${encodeURIComponent(metadataId)}/media/${encodeURIComponent(versionId)}`;
+    await this.request(target, {}, { method: "DELETE" });
+    return { deleted: true, target };
+  }
+
+  async deleteSubtitleStream(streamId, extension = "srt") {
+    const id = text(streamId).trim();
+    if (!id) {
+      throw new Error("A Plex subtitle stream ID is required for subtitle deletion.");
+    }
+
+    const safeExtension = cleanExtension(extension, "srt");
+    const target = `/library/streams/${encodeURIComponent(id)}.${safeExtension}`;
     await this.request(target, {}, { method: "DELETE" });
     return { deleted: true, target };
   }

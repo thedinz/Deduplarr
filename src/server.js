@@ -93,6 +93,38 @@ async function runScanJob(id, config, libraryKeys) {
   }
 }
 
+async function runSubtitleScanJob(id, config, libraryKeys) {
+  try {
+    const client = new PlexClient(config);
+    updateScanJob(id, {
+      status: "running",
+      progress: 2,
+      message: "Connecting to Plex"
+    });
+    const result = await client.subtitleDuplicates(libraryKeys, {
+      onProgress: (progress) => updateScanJob(id, progress)
+    });
+    updateScanJob(id, {
+      status: "completed",
+      progress: 100,
+      message: "Subtitle scan complete",
+      finishedAt: new Date().toISOString(),
+      result: {
+        ...result,
+        scannedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    updateScanJob(id, {
+      status: "failed",
+      progress: 100,
+      message: "Subtitle scan failed",
+      finishedAt: new Date().toISOString(),
+      error: error.message || "Subtitle scan failed"
+    });
+  }
+}
+
 async function clientFromConfig() {
   return new PlexClient(await getRuntimeConfig());
 }
@@ -287,12 +319,50 @@ app.post(
   })
 );
 
+app.post(
+  "/api/subtitle-scan",
+  asyncRoute(async (request, response) => {
+    cleanupScanJobs();
+    const config = request.runtimeConfig || (await getRuntimeConfig());
+    const libraryKeys = Array.isArray(request.body?.libraryKeys)
+      ? request.body.libraryKeys.map(String)
+      : [];
+    const job = {
+      id: crypto.randomUUID(),
+      status: "queued",
+      progress: 0,
+      message: "Queued",
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      finishedAt: null,
+      result: null,
+      error: null
+    };
+    scanJobs.set(job.id, job);
+    runSubtitleScanJob(job.id, config, libraryKeys);
+    response.status(202).json(serializeScanJob(job));
+  })
+);
+
 app.get(
   "/api/scan/:scanId",
   asyncRoute(async (request, response) => {
     const job = scanJobs.get(request.params.scanId);
     if (!job) {
       response.status(404).json({ error: "Scan job not found." });
+      return;
+    }
+
+    response.json(serializeScanJob(job));
+  })
+);
+
+app.get(
+  "/api/subtitle-scan/:scanId",
+  asyncRoute(async (request, response) => {
+    const job = scanJobs.get(request.params.scanId);
+    if (!job) {
+      response.status(404).json({ error: "Subtitle scan job not found." });
       return;
     }
 
@@ -322,6 +392,33 @@ app.post(
       await client.deleteMedia(
         String(request.body?.ratingKey || ""),
         String(request.body?.mediaId || "")
+      )
+    );
+  })
+);
+
+app.post(
+  "/api/subtitle-delete",
+  asyncRoute(async (request, response) => {
+    const config = await getRuntimeConfig();
+    if (!config.allowDeletes) {
+      response.status(403).json({
+        error:
+          "Destructive actions are disabled. Set ENABLE_DESTRUCTIVE_ACTIONS=true or enable deletes in Settings."
+      });
+      return;
+    }
+
+    if (request.body?.confirmText !== "DELETE") {
+      response.status(400).json({ error: "Confirmation text did not match." });
+      return;
+    }
+
+    const client = new PlexClient(config);
+    response.json(
+      await client.deleteSubtitleStream(
+        String(request.body?.streamId || ""),
+        String(request.body?.extension || "")
       )
     );
   })

@@ -1,12 +1,12 @@
 # Deduplarr
 
-Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an interface shaped for the *arr ecosystem. It connects to Plex with a server URL and token, finds duplicate movie and episode versions, shows file paths and stream details, scores each version, and lets you make the keep/delete decision at a glance.
+Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an interface shaped for the *arr ecosystem. It connects to Plex with a server URL and token, finds duplicate movie and episode versions, audits duplicate subtitle sidecars, shows file paths and stream details, scores each version, and lets you make the keep/delete decision at a glance.
 
 ## Plex Access Model
 
 The first version is intentionally API-only. Plex already knows each library item, media version, media part, file path, video stream, audio stream, subtitle stream, and duplicate grouping, so Deduplarr does not need direct filesystem mounts for scanning or scoring.
 
-Deletion is different: Deduplarr asks Plex to delete the selected media version. Auto mode can delete every rejected version across the scan in one guarded action. That requires Plex itself to have media deletion enabled and write access to the media path. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
+Deletion is different: Deduplarr asks Plex to delete the selected media version or external subtitle stream. Auto mode can delete every rejected version or rejected subtitle sidecar across the scan in one guarded action. That requires Plex itself to have media deletion enabled and write access to the media path. Embedded and burned-in subtitles are not delete targets. If Plex cannot delete the file, a later filesystem-delete fallback can be added, but that would require a path mapping layer between Plex paths and Deduplarr container paths.
 
 ## Docker Compose
 

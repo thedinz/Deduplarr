@@ -43,6 +43,10 @@
             <i data-lucide="copy"></i>
             <span>Duplicates</span>
           </button>
+          <button class="nav-item" data-view="subtitles">
+            <i data-lucide="captions"></i>
+            <span>Subtitles</span>
+          </button>
           <button class="nav-item" data-view="settings">
             <i data-lucide="settings"></i>
             <span>Settings</span>
@@ -129,6 +133,62 @@
 
           <div id="messageArea" class="message-area"></div>
           <div id="duplicatesList" class="duplicates-list"></div>
+        </section>
+
+        <section id="subtitlesView" class="view">
+          <div class="toolbar">
+            <div class="library-strip" id="subtitleLibraryStrip"></div>
+            <div class="toolbar-actions">
+              <button id="subtitleAutoSelectButton" class="secondary-button" type="button">
+                <i data-lucide="check-check"></i>
+                <span>Auto Select</span>
+              </button>
+              <button id="deleteRejectedSubtitlesButton" class="danger-button" type="button">
+                <i data-lucide="trash-2"></i>
+                <span>Delete Rejected</span>
+              </button>
+              <label class="search-field">
+                <i data-lucide="search"></i>
+                <input id="subtitleSearchInput" type="search" placeholder="Filter">
+              </label>
+              <button id="subtitleScanButton" class="primary-button">
+                <i data-lucide="radar"></i>
+                <span>Scan</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="subtitleScanProgressPanel" class="scan-progress-panel is-hidden">
+            <div class="scan-progress-header">
+              <span id="subtitleScanProgressText">Queued</span>
+              <span id="subtitleScanProgressMeta">0% | 0:00</span>
+            </div>
+            <div class="scan-progress-track" aria-hidden="true">
+              <div id="subtitleScanProgressFill" class="scan-progress-fill"></div>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <span>Groups</span>
+              <strong id="subtitleGroupCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Sidecars</span>
+              <strong id="subtitleFileCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Rejected</span>
+              <strong id="subtitleRejectedCount">0</strong>
+            </div>
+            <div class="stat">
+              <span>Libraries</span>
+              <strong id="subtitleLibraryCount">0</strong>
+            </div>
+          </div>
+
+          <div id="subtitleMessageArea" class="message-area"></div>
+          <div id="subtitlesList" class="duplicates-list"></div>
         </section>
 
         <section id="settingsView" class="view">
