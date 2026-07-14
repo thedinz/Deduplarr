@@ -99,7 +99,6 @@ const elements = {
   serverSummary: document.querySelector("#serverSummary"),
   userBadge: document.querySelector("#userBadge"),
   connectionBadge: document.querySelector("#connectionBadge"),
-  refreshButton: document.querySelector("#refreshButton"),
   logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
   subtitleLibraryStrip: document.querySelector("#subtitleLibraryStrip"),
@@ -1932,7 +1931,6 @@ function setupPreferenceControls() {
 function setupEvents() {
   elements.loginForm.addEventListener("submit", login);
   elements.logoutButton.addEventListener("click", logout);
-  elements.refreshButton.addEventListener("click", refreshConnection);
   elements.scanButton.addEventListener("click", scan);
   elements.subtitleScanButton.addEventListener("click", subtitleScan);
   elements.reviewModeSelect.addEventListener("change", () => setReviewMode(elements.reviewModeSelect.value));
