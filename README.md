@@ -25,7 +25,7 @@ The Media Files page finds duplicate media versions and helps choose which versi
 
 The Subtitle Files page audits external subtitle sidecars only. Embedded and burned-in subtitles are ignored because Plex cannot remove them as standalone files. Deduplarr groups sidecars by media item, part, language, forced status, and SDH/CC status, then suggests a keeper based on subtitle preferences and Plex stream details. If enabled, non-preferred subtitle languages can be marked for full cleanup even when no preferred-language subtitle exists for that item.
 
-Use the top-bar **Scan Plex** action to refresh the selected Plex libraries before either Deduplarr scan. Deduplarr tracks the activity IDs returned by Plex and displays aggregate progress until Plex finishes. If an older Plex server starts the refresh without exposing an activity ID, Deduplarr reports that the scan was triggered but progress is unavailable.
+Use the top-bar **Scan Plex** action to refresh the selected Plex libraries before either Deduplarr scan. Deduplarr tracks activity IDs returned by Plex and can also match activities by library section. When Plex exposes only the section's scanning state, Deduplarr shows indeterminate progress until the refresh finishes.
 
 Bulk deletes require typing `DELETE ALL`. While deletion is running, the dialog shows progress, lets you cancel remaining work, retries transient transport failures, and keeps sampled failure details visible when Plex or the browser cannot complete a request.
 

@@ -232,6 +232,46 @@ function directoryList(container) {
   return asArray(container?.Directory);
 }
 
+function activityLibrarySectionId(activity) {
+  const context = activity?.context || activity?.Context || {};
+  return text(
+    activity?.librarySectionId ||
+      context.librarySectionID ||
+      context.librarySectionId ||
+      context.librarySectionKey ||
+      context.sectionID ||
+      context.sectionId
+  );
+}
+
+export function findLibraryActivity(activities, library) {
+  const libraryKey = text(library?.key || library).trim();
+  const libraryTitle = text(library?.title).trim().toLowerCase();
+  const candidates = asArray(activities);
+  const bySection = candidates.filter(
+    (activity) => activityLibrarySectionId(activity) === libraryKey
+  );
+  const likelyLibraryActivity = (activity) => {
+    const type = text(activity?.type).toLowerCase();
+    return type.includes("library") && (
+      type.includes("update") ||
+      type.includes("refresh") ||
+      type.includes("scan")
+    );
+  };
+
+  return (
+    bySection.find(likelyLibraryActivity) ||
+    candidates.find((activity) => {
+      if (!libraryTitle || !likelyLibraryActivity(activity)) return false;
+      return [activity?.title, activity?.subtitle]
+        .map((value) => text(value).trim().toLowerCase())
+        .includes(libraryTitle);
+    }) ||
+    null
+  );
+}
+
 function streamGroups(part) {
   const streams = asArray(part?.Stream);
   return {
@@ -572,6 +612,8 @@ export class PlexClient {
       type: text(directory.type),
       agent: text(directory.agent),
       scanner: text(directory.scanner),
+      refreshing: booleanValue(directory.refreshing),
+      uuid: text(directory.uuid),
       locations: asArray(directory.Location).map((location) => text(location.path))
     }));
   }
@@ -586,7 +628,8 @@ export class PlexClient {
       title: text(activity.title),
       subtitle: text(activity.subtitle),
       progress: number(activity.progress, -1),
-      context: activity.Context || activity.context || {}
+      context: activity.Context || activity.context || {},
+      librarySectionId: activityLibrarySectionId(activity)
     }));
   }
 

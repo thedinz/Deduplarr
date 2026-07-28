@@ -16,7 +16,7 @@ import {
   verifyPassword,
   hashPassword
 } from "./auth.js";
-import { PlexClient } from "./plex.js";
+import { findLibraryActivity, PlexClient } from "./plex.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -25,6 +25,7 @@ const port = Number(process.env.PORT || 7889);
 const scanJobs = new Map();
 const SCHEDULER_INTERVAL_MS = 60 * 1000;
 const PLEX_ACTIVITY_POLL_MS = 1000;
+const PLEX_ACTIVITY_START_GRACE_POLLS = 5;
 let schedulerChecking = false;
 
 app.disable("x-powered-by");
@@ -295,7 +296,9 @@ function plexRefreshResult(libraries, errors = []) {
       libraryKey: library.libraryKey,
       libraryTitle: library.libraryTitle,
       activityId: library.activityId,
-      progressAvailable: Boolean(library.activityId)
+      progressAvailable: Boolean(library.numericProgressSeen),
+      statusTracked: Boolean(library.seen),
+      trackingSource: library.trackingSource || "unavailable"
     })),
     errors
   };
@@ -336,7 +339,9 @@ async function runPlexRefreshJob(id, config, libraryKeys) {
           ...(await client.refreshLibrary(library)),
           seen: false,
           missingPolls: 0,
-          progress: 0
+          progress: 0,
+          numericProgressSeen: false,
+          trackingSource: ""
         });
       } catch (error) {
         errors.push({
@@ -351,31 +356,37 @@ async function runPlexRefreshJob(id, config, libraryKeys) {
       throw new Error(errors.map((error) => error.message).join(" | ") || "Plex scan failed.");
     }
 
-    const tracked = refreshed.filter((library) => library.activityId);
-    if (!tracked.length) {
-      updateScanJob(id, {
-        status: "completed",
-        progress: 100,
-        message: "Plex scan triggered; progress is unavailable on this server",
-        finishedAt: new Date().toISOString(),
-        result: plexRefreshResult(refreshed, errors)
-      });
-      return;
-    }
-
     updateScanJob(id, {
       progress: 5,
       indeterminate: true,
-      message: `Plex is scanning ${tracked.length} ${tracked.length === 1 ? "library" : "libraries"}`
+      message: `Plex is scanning ${refreshed.length} ${refreshed.length === 1 ? "library" : "libraries"}`
     });
 
-    while (tracked.some((library) => library.progress < 100)) {
+    while (refreshed.some((library) => library.progress < 100)) {
       await new Promise((resolve) => setTimeout(resolve, PLEX_ACTIVITY_POLL_MS));
 
-      let activities;
+      let activities = [];
+      let currentLibraries = [];
+      let activitiesAvailable = true;
+      let librariesAvailable = true;
+      let activitiesError = null;
+      let librariesError = null;
+
       try {
         activities = await client.activities();
       } catch (error) {
+        activitiesAvailable = false;
+        activitiesError = error;
+      }
+
+      try {
+        currentLibraries = await client.libraries();
+      } catch (error) {
+        librariesAvailable = false;
+        librariesError = error;
+      }
+
+      if (!activitiesAvailable && !librariesAvailable) {
         updateScanJob(id, {
           status: "completed",
           progress: 100,
@@ -384,46 +395,83 @@ async function runPlexRefreshJob(id, config, libraryKeys) {
           finishedAt: new Date().toISOString(),
           result: plexRefreshResult(refreshed, [
             ...errors,
-            { message: `Could not read Plex activities: ${error.message}` }
+            {
+              message: [
+                `Could not read Plex activities: ${activitiesError?.message}`,
+                `Could not read Plex library state: ${librariesError?.message}`
+              ].join(" | ")
+            }
           ])
         });
         return;
       }
 
       const activitiesById = new Map(
-        activities.map((activity) => [activity.uuid, activity])
+        activities
+          .filter((activity) => activity.uuid)
+          .map((activity) => [activity.uuid, activity])
+      );
+      const librariesByKey = new Map(
+        currentLibraries.map((library) => [String(library.key), library])
       );
       let activeActivity = null;
+      let activeLibrary = null;
 
-      for (const library of tracked) {
+      for (const library of refreshed) {
         if (library.progress >= 100) continue;
-        const activity = activitiesById.get(library.activityId);
+        const activity =
+          activitiesById.get(library.activityId) ||
+          findLibraryActivity(activities, {
+            key: library.libraryKey,
+            title: library.libraryTitle
+          });
+        const currentLibrary = librariesByKey.get(library.libraryKey);
+
         if (activity) {
+          library.activityId ||= activity.uuid;
           library.seen = true;
           library.missingPolls = 0;
           library.progress = activity.progress;
+          library.numericProgressSeen ||= activity.progress >= 0;
+          library.trackingSource = "activity";
           activeActivity ||= activity;
+        } else if (currentLibrary?.refreshing) {
+          library.seen = true;
+          library.missingPolls = 0;
+          library.progress = -1;
+          library.trackingSource = "section";
+          activeLibrary ||= currentLibrary;
         } else {
           library.missingPolls += 1;
-          if (library.seen || library.missingPolls >= 2) {
+          if (
+            library.seen ||
+            library.missingPolls >= PLEX_ACTIVITY_START_GRACE_POLLS
+          ) {
             library.progress = 100;
           }
         }
       }
 
       const progressValues = refreshed.map((library) => {
-        if (!library.activityId) return 100;
         return library.progress < 0 ? 0 : library.progress;
       });
       const progress = Math.round(
         progressValues.reduce((sum, value) => sum + value, 0) / refreshed.length
       );
-      const indeterminate = tracked.some(
-        (library) => library.progress < 0 && library.progress < 100
+      const indeterminate = refreshed.some(
+        (library) =>
+          library.progress < 0 ||
+          (
+            library.progress < 100 &&
+            !library.seen &&
+            library.missingPolls < PLEX_ACTIVITY_START_GRACE_POLLS
+          )
       );
-      const remaining = tracked.filter((library) => library.progress < 100).length;
+      const remaining = refreshed.filter((library) => library.progress < 100).length;
       const activityLabel =
-        activeActivity?.subtitle || activeActivity?.title || "Plex library scan";
+        activeActivity?.subtitle ||
+        activeActivity?.title ||
+        (activeLibrary ? `Scanning ${activeLibrary.title}` : "Plex library scan");
 
       updateScanJob(id, {
         progress,
