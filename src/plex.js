@@ -515,7 +515,7 @@ export class PlexClient {
     return url;
   }
 
-  async request(path, params = {}, options = {}) {
+  async requestWithResponse(path, params = {}, options = {}) {
     const response = await fetch(this.buildUrl(path, params), {
       method: options.method || "GET",
       headers: {
@@ -537,13 +537,18 @@ export class PlexClient {
       throw error;
     }
 
-    if (!body) return {};
+    if (!body) return { data: {}, response };
 
     try {
-      return JSON.parse(body);
+      return { data: JSON.parse(body), response };
     } catch {
-      return parser.parse(body);
+      return { data: parser.parse(body), response };
     }
+  }
+
+  async request(path, params = {}, options = {}) {
+    const { data } = await this.requestWithResponse(path, params, options);
+    return data;
   }
 
   async serverInfo() {
@@ -569,6 +574,37 @@ export class PlexClient {
       scanner: text(directory.scanner),
       locations: asArray(directory.Location).map((location) => text(location.path))
     }));
+  }
+
+  async activities() {
+    const data = await this.request("/activities");
+    const container = data.MediaContainer || data;
+    return asArray(container.Activity).map((activity) => ({
+      uuid: text(activity.uuid),
+      type: text(activity.type),
+      cancellable: booleanValue(activity.cancellable),
+      title: text(activity.title),
+      subtitle: text(activity.subtitle),
+      progress: number(activity.progress, -1),
+      context: activity.Context || activity.context || {}
+    }));
+  }
+
+  async refreshLibrary(library) {
+    const libraryKey = text(library?.key).trim();
+    if (!libraryKey) throw new Error("Plex library key is required.");
+
+    const { response } = await this.requestWithResponse(
+      `/library/sections/${encodeURIComponent(libraryKey)}/refresh`,
+      {},
+      { method: "POST" }
+    );
+
+    return {
+      libraryKey,
+      libraryTitle: text(library?.title, `Library ${libraryKey}`),
+      activityId: text(response.headers.get("X-Plex-Activity"))
+    };
   }
 
   async listSectionItems(library, onlyDuplicates = true, onPage = () => {}) {

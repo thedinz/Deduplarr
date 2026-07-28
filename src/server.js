@@ -24,6 +24,7 @@ const app = express();
 const port = Number(process.env.PORT || 7889);
 const scanJobs = new Map();
 const SCHEDULER_INTERVAL_MS = 60 * 1000;
+const PLEX_ACTIVITY_POLL_MS = 1000;
 let schedulerChecking = false;
 
 app.disable("x-powered-by");
@@ -46,6 +47,7 @@ function serializeScanJob(job) {
     source: job.source,
     status: job.status,
     progress: job.progress,
+    indeterminate: Boolean(job.indeterminate),
     message: job.message,
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
@@ -77,6 +79,7 @@ function createScanJob(kind, source = "manual") {
     source,
     status: "queued",
     progress: 0,
+    indeterminate: false,
     message: source === "scheduled" ? "Scheduled" : "Queued",
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -91,6 +94,7 @@ function startScanJob(kind, config, libraryKeys = [], source = "manual") {
   const job = createScanJob(kind, source);
   scanJobs.set(job.id, job);
   if (kind === "subtitles") runSubtitleScanJob(job.id, config, libraryKeys);
+  else if (kind === "plex") runPlexRefreshJob(job.id, config, libraryKeys);
   else runScanJob(job.id, config, libraryKeys);
   return job;
 }
@@ -281,6 +285,173 @@ async function runSubtitleScanJob(id, config, libraryKeys) {
       message: "Subtitle scan failed",
       finishedAt: new Date().toISOString(),
       error: error.message || "Subtitle scan failed"
+    });
+  }
+}
+
+function plexRefreshResult(libraries, errors = []) {
+  return {
+    libraries: libraries.map((library) => ({
+      libraryKey: library.libraryKey,
+      libraryTitle: library.libraryTitle,
+      activityId: library.activityId,
+      progressAvailable: Boolean(library.activityId)
+    })),
+    errors
+  };
+}
+
+async function runPlexRefreshJob(id, config, libraryKeys) {
+  const refreshed = [];
+  const errors = [];
+
+  try {
+    const client = new PlexClient(config);
+    updateScanJob(id, {
+      status: "running",
+      progress: 0,
+      message: "Loading Plex libraries"
+    });
+
+    const libraries = await client.libraries();
+    const selected = libraries.filter((library) => {
+      const supported = ["movie", "show", "video"].includes(library.type);
+      const requested =
+        libraryKeys.length === 0 || libraryKeys.includes(String(library.key));
+      return supported && requested;
+    });
+
+    if (!selected.length) {
+      throw new Error("Select at least one Plex library to scan.");
+    }
+
+    for (const [index, library] of selected.entries()) {
+      updateScanJob(id, {
+        progress: Math.round((index / selected.length) * 5),
+        message: `Starting Plex scan for ${library.title}`
+      });
+
+      try {
+        refreshed.push({
+          ...(await client.refreshLibrary(library)),
+          seen: false,
+          missingPolls: 0,
+          progress: 0
+        });
+      } catch (error) {
+        errors.push({
+          libraryKey: String(library.key),
+          libraryTitle: library.title,
+          message: error.message || "Could not start Plex scan"
+        });
+      }
+    }
+
+    if (!refreshed.length) {
+      throw new Error(errors.map((error) => error.message).join(" | ") || "Plex scan failed.");
+    }
+
+    const tracked = refreshed.filter((library) => library.activityId);
+    if (!tracked.length) {
+      updateScanJob(id, {
+        status: "completed",
+        progress: 100,
+        message: "Plex scan triggered; progress is unavailable on this server",
+        finishedAt: new Date().toISOString(),
+        result: plexRefreshResult(refreshed, errors)
+      });
+      return;
+    }
+
+    updateScanJob(id, {
+      progress: 5,
+      indeterminate: true,
+      message: `Plex is scanning ${tracked.length} ${tracked.length === 1 ? "library" : "libraries"}`
+    });
+
+    while (tracked.some((library) => library.progress < 100)) {
+      await new Promise((resolve) => setTimeout(resolve, PLEX_ACTIVITY_POLL_MS));
+
+      let activities;
+      try {
+        activities = await client.activities();
+      } catch (error) {
+        updateScanJob(id, {
+          status: "completed",
+          progress: 100,
+          indeterminate: false,
+          message: "Plex scan triggered; activity progress is unavailable",
+          finishedAt: new Date().toISOString(),
+          result: plexRefreshResult(refreshed, [
+            ...errors,
+            { message: `Could not read Plex activities: ${error.message}` }
+          ])
+        });
+        return;
+      }
+
+      const activitiesById = new Map(
+        activities.map((activity) => [activity.uuid, activity])
+      );
+      let activeActivity = null;
+
+      for (const library of tracked) {
+        if (library.progress >= 100) continue;
+        const activity = activitiesById.get(library.activityId);
+        if (activity) {
+          library.seen = true;
+          library.missingPolls = 0;
+          library.progress = activity.progress;
+          activeActivity ||= activity;
+        } else {
+          library.missingPolls += 1;
+          if (library.seen || library.missingPolls >= 2) {
+            library.progress = 100;
+          }
+        }
+      }
+
+      const progressValues = refreshed.map((library) => {
+        if (!library.activityId) return 100;
+        return library.progress < 0 ? 0 : library.progress;
+      });
+      const progress = Math.round(
+        progressValues.reduce((sum, value) => sum + value, 0) / refreshed.length
+      );
+      const indeterminate = tracked.some(
+        (library) => library.progress < 0 && library.progress < 100
+      );
+      const remaining = tracked.filter((library) => library.progress < 100).length;
+      const activityLabel =
+        activeActivity?.subtitle || activeActivity?.title || "Plex library scan";
+
+      updateScanJob(id, {
+        progress,
+        indeterminate,
+        message: remaining
+          ? `${activityLabel} (${remaining} ${remaining === 1 ? "library" : "libraries"} remaining)`
+          : "Plex library scan complete"
+      });
+    }
+
+    updateScanJob(id, {
+      status: "completed",
+      progress: 100,
+      indeterminate: false,
+      message: errors.length
+        ? `Plex scan complete with ${errors.length} ${errors.length === 1 ? "error" : "errors"}`
+        : "Plex library scan complete",
+      finishedAt: new Date().toISOString(),
+      result: plexRefreshResult(refreshed, errors)
+    });
+  } catch (error) {
+    updateScanJob(id, {
+      status: "failed",
+      progress: 100,
+      indeterminate: false,
+      message: "Plex library scan failed",
+      finishedAt: new Date().toISOString(),
+      error: error.message || "Plex library scan failed"
     });
   }
 }
@@ -478,12 +649,37 @@ app.post(
   })
 );
 
+app.post(
+  "/api/plex-scan",
+  asyncRoute(async (request, response) => {
+    const config = request.runtimeConfig || (await getRuntimeConfig());
+    const libraryKeys = Array.isArray(request.body?.libraryKeys)
+      ? request.body.libraryKeys.map(String)
+      : [];
+    const job = startScanJob("plex", config, libraryKeys, "manual");
+    response.status(202).json(serializeScanJob(job));
+  })
+);
+
 app.get(
   "/api/scan/:scanId",
   asyncRoute(async (request, response) => {
     const job = scanJobs.get(request.params.scanId);
     if (!job) {
       response.status(404).json({ error: "Scan job not found." });
+      return;
+    }
+
+    response.json(serializeScanJob(job));
+  })
+);
+
+app.get(
+  "/api/plex-scan/:scanId",
+  asyncRoute(async (request, response) => {
+    const job = scanJobs.get(request.params.scanId);
+    if (!job || job.kind !== "plex") {
+      response.status(404).json({ error: "Plex scan job not found." });
       return;
     }
 

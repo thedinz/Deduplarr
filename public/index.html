@@ -65,6 +65,15 @@
             <p id="serverSummary">Not connected to Plex</p>
           </div>
           <div class="topbar-actions">
+            <button
+              id="plexScanButton"
+              class="secondary-button"
+              type="button"
+              title="Scan the selected libraries in Plex"
+            >
+              <i data-lucide="refresh-cw"></i>
+              <span>Scan Plex</span>
+            </button>
             <span id="userBadge" class="status-badge muted">admin</span>
             <span id="connectionBadge" class="status-badge muted">Offline</span>
             <button id="logoutButton" class="icon-button" title="Sign out">
@@ -72,6 +81,21 @@
             </button>
           </div>
         </header>
+
+        <div
+          id="plexScanProgressPanel"
+          class="scan-progress-panel global-scan-progress is-hidden"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="scan-progress-header">
+            <span id="plexScanProgressText">Queued</span>
+            <span id="plexScanProgressMeta">0% | 0:00</span>
+          </div>
+          <div class="scan-progress-track" aria-hidden="true">
+            <div id="plexScanProgressFill" class="scan-progress-fill"></div>
+          </div>
+        </div>
 
         <section id="duplicatesView" class="view active-view">
           <div class="toolbar">
@@ -202,7 +226,7 @@
               <p>Deduplarr reads Plex's database through the Plex API. It does not inspect mounted media folders directly, so scan results are only as current as Plex's most recent library scan and file analysis.</p>
               <ul class="instruction-list">
                 <li>Finish downloads, imports, upgrades, and post-processing before running Deduplarr.</li>
-                <li>Run a Plex library scan for the affected libraries right before running Deduplarr.</li>
+                <li>Select the affected libraries and use <strong>Scan Plex</strong> before running a Deduplarr media or subtitle scan.</li>
                 <li>Wait for Plex to finish scanning and analyzing changed files before trusting codec, bitrate, resolution, size, or subtitle stream details.</li>
               </ul>
             </section>
@@ -214,7 +238,7 @@
               </div>
               <ol class="instruction-steps">
                 <li>Let Radarr, Sonarr, download clients, Tdarr, and any other file processors finish their work.</li>
-                <li>Run a Plex scan for the specific libraries or folders that changed.</li>
+                <li>Select the libraries that changed and use <strong>Scan Plex</strong>.</li>
                 <li>Confirm Plex now shows the expected file versions, paths, sizes, codecs, and subtitle sidecars.</li>
                 <li>Run the Media Files or Subtitle Files scan in Deduplarr.</li>
                 <li>Review keep preferences, suggested keepers, and file paths before deleting.</li>

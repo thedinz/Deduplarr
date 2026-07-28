@@ -22,6 +22,10 @@ const state = {
   subtitleScanStartedAt: null,
   subtitleScanPollTimer: null,
   subtitleScanElapsedTimer: null,
+  plexScanJob: null,
+  plexScanStartedAt: null,
+  plexScanPollTimer: null,
+  plexScanElapsedTimer: null,
   subtitleRenderLimit: SUBTITLE_GROUP_RENDER_BATCH,
   activeDelete: null,
   deleteInProgress: false,
@@ -99,6 +103,7 @@ const elements = {
   serverSummary: document.querySelector("#serverSummary"),
   userBadge: document.querySelector("#userBadge"),
   connectionBadge: document.querySelector("#connectionBadge"),
+  plexScanButton: document.querySelector("#plexScanButton"),
   logoutButton: document.querySelector("#logoutButton"),
   libraryStrip: document.querySelector("#libraryStrip"),
   subtitleLibraryStrip: document.querySelector("#subtitleLibraryStrip"),
@@ -117,6 +122,10 @@ const elements = {
   subtitleScanProgressText: document.querySelector("#subtitleScanProgressText"),
   subtitleScanProgressMeta: document.querySelector("#subtitleScanProgressMeta"),
   subtitleScanProgressFill: document.querySelector("#subtitleScanProgressFill"),
+  plexScanProgressPanel: document.querySelector("#plexScanProgressPanel"),
+  plexScanProgressText: document.querySelector("#plexScanProgressText"),
+  plexScanProgressMeta: document.querySelector("#plexScanProgressMeta"),
+  plexScanProgressFill: document.querySelector("#plexScanProgressFill"),
   searchInput: document.querySelector("#searchInput"),
   subtitleSearchInput: document.querySelector("#subtitleSearchInput"),
   groupCount: document.querySelector("#groupCount"),
@@ -451,6 +460,17 @@ function renderSubtitleScanProgress(job, startedAt = state.subtitleScanStartedAt
   elements.subtitleScanProgressFill.style.width = `${progress}%`;
 }
 
+function renderPlexScanProgress(job, startedAt = state.plexScanStartedAt) {
+  const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
+  const elapsed = startedAt ? Date.now() - startedAt : 0;
+  const indeterminate = Boolean(job?.indeterminate);
+  elements.plexScanProgressPanel.classList.remove("is-hidden");
+  elements.plexScanProgressText.textContent = job?.message || "Scanning Plex libraries";
+  elements.plexScanProgressMeta.textContent = `${indeterminate ? "Working" : `${Math.round(progress)}%`} | ${formatElapsed(elapsed)}`;
+  elements.plexScanProgressFill.classList.toggle("indeterminate", indeterminate);
+  elements.plexScanProgressFill.style.width = `${progress}%`;
+}
+
 function renderDeleteProgress({
   completed = 0,
   total = 0,
@@ -576,6 +596,17 @@ function clearSubtitleScanTimers() {
   if (state.subtitleScanElapsedTimer) {
     clearInterval(state.subtitleScanElapsedTimer);
     state.subtitleScanElapsedTimer = null;
+  }
+}
+
+function clearPlexScanTimers() {
+  if (state.plexScanPollTimer) {
+    clearTimeout(state.plexScanPollTimer);
+    state.plexScanPollTimer = null;
+  }
+  if (state.plexScanElapsedTimer) {
+    clearInterval(state.plexScanElapsedTimer);
+    state.plexScanElapsedTimer = null;
   }
 }
 
@@ -1351,6 +1382,64 @@ async function refreshConnection() {
   }
 }
 
+async function plexScan() {
+  clearPlexScanTimers();
+  setBusy(elements.plexScanButton, true, "Scanning Plex");
+  state.plexScanStartedAt = Date.now();
+  state.plexScanJob = {
+    status: "queued",
+    progress: 0,
+    message: "Starting Plex library scan"
+  };
+  renderPlexScanProgress(state.plexScanJob);
+  state.plexScanElapsedTimer = setInterval(() => {
+    if (state.plexScanJob) renderPlexScanProgress(state.plexScanJob);
+  }, 1000);
+
+  try {
+    state.plexScanJob = await api("/api/plex-scan", {
+      method: "POST",
+      body: JSON.stringify({
+        libraryKeys: [...state.selectedLibraries]
+      })
+    });
+    renderPlexScanProgress(state.plexScanJob);
+
+    while (["queued", "running"].includes(state.plexScanJob.status)) {
+      await new Promise((resolve) => {
+        state.plexScanPollTimer = setTimeout(resolve, 700);
+      });
+      state.plexScanJob = await api(`/api/plex-scan/${state.plexScanJob.id}`);
+      renderPlexScanProgress(state.plexScanJob);
+    }
+
+    if (state.plexScanJob.status === "failed") {
+      throw new Error(state.plexScanJob.error || "Plex library scan failed.");
+    }
+
+    const errors = state.plexScanJob.result?.errors || [];
+    elements.plexScanProgressText.title = errors
+      .map((error) =>
+        [error.libraryTitle, error.message].filter(Boolean).join(": ")
+      )
+      .join(" | ");
+  } catch (error) {
+    state.plexScanJob = {
+      ...(state.plexScanJob || {}),
+      status: "failed",
+      progress: 100,
+      indeterminate: false,
+      message: error.message,
+      error: error.message
+    };
+    renderPlexScanProgress(state.plexScanJob);
+  } finally {
+    clearPlexScanTimers();
+    if (state.plexScanJob) renderPlexScanProgress(state.plexScanJob);
+    setBusy(elements.plexScanButton, false, "Scan Plex");
+  }
+}
+
 async function scan() {
   clearScanTimers();
   setBusy(elements.scanButton, true, "Scanning");
@@ -1553,6 +1642,9 @@ async function login(event) {
 }
 
 async function logout() {
+  clearScanTimers();
+  clearSubtitleScanTimers();
+  clearPlexScanTimers();
   await api("/api/logout", { method: "POST" }).catch(() => {});
   showLogin({ authMode: state.config?.auth?.mode || "builtin" });
 }
@@ -1931,6 +2023,7 @@ function setupPreferenceControls() {
 function setupEvents() {
   elements.loginForm.addEventListener("submit", login);
   elements.logoutButton.addEventListener("click", logout);
+  elements.plexScanButton.addEventListener("click", plexScan);
   elements.scanButton.addEventListener("click", scan);
   elements.subtitleScanButton.addEventListener("click", subtitleScan);
   elements.reviewModeSelect.addEventListener("change", () => setReviewMode(elements.reviewModeSelect.value));
