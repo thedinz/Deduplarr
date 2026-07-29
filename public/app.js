@@ -475,16 +475,20 @@ function renderDeleteProgress({
   completed = 0,
   total = 0,
   failures = 0,
+  alreadyAbsent = 0,
   skipped = 0,
   message = "Deleting"
 }) {
   const progress = total ? Math.max(0, Math.min(100, (completed / total) * 100)) : 0;
   const failureText = failures ? ` | ${formatInteger(failures)} failed` : "";
+  const absentText = alreadyAbsent
+    ? ` | ${formatInteger(alreadyAbsent)} already absent`
+    : "";
   const skippedText = skipped ? ` | ${formatInteger(skipped)} skipped` : "";
-  state.deleteProgress = { completed, total, failures, skipped, message };
+  state.deleteProgress = { completed, total, failures, alreadyAbsent, skipped, message };
   elements.deleteProgressPanel.classList.remove("is-hidden");
   elements.deleteProgressText.textContent = message;
-  elements.deleteProgressMeta.textContent = `${formatInteger(completed)} / ${formatInteger(total)}${failureText}${skippedText}`;
+  elements.deleteProgressMeta.textContent = `${formatInteger(completed)} / ${formatInteger(total)}${failureText}${absentText}${skippedText}`;
   elements.deleteProgressFill.style.width = `${progress}%`;
 }
 
@@ -1778,6 +1782,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
   const failures = [];
   const failureSamples = [];
   const deletedTargets = [];
+  const alreadyAbsentTargets = [];
   const total = targets.length;
   let cursor = 0;
   let completed = 0;
@@ -1791,6 +1796,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
       completed,
       total,
       failures: failures.length,
+      alreadyAbsent: alreadyAbsentTargets.length,
       skipped: state.deleteCancelRequested ? Math.max(total - completed, 0) : 0,
       message: `Deleting ${deleteTargetLabel(kind)}`
     });
@@ -1806,8 +1812,9 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
       cursor += 1;
 
       try {
-        await deleteTargetWithRetry(target, kind, signal);
-        deletedTargets.push(target);
+        const result = await deleteTargetWithRetry(target, kind, signal);
+        if (result?.alreadyAbsent) alreadyAbsentTargets.push(target);
+        else deletedTargets.push(target);
       } catch (error) {
         if (!(state.deleteCancelRequested && error.name === "AbortError")) {
           failures.push({ target, error });
@@ -1830,6 +1837,7 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
     completed,
     total,
     failures: failures.length,
+    alreadyAbsent: alreadyAbsentTargets.length,
     skipped,
     message: state.deleteCancelRequested
       ? "Delete canceled"
@@ -1842,6 +1850,8 @@ async function deleteTargetsWithProgress(targets, kind, bulk, signal) {
   return {
     deleted: deletedTargets.length,
     deletedTargets,
+    alreadyAbsent: alreadyAbsentTargets.length,
+    alreadyAbsentTargets,
     failures,
     canceled: state.deleteCancelRequested,
     skipped
@@ -1856,15 +1866,17 @@ function subtitleStatsFromGroups(groups, previousStats = {}) {
   };
 }
 
-function removeDeletedSubtitleTargets(deletedTargets) {
-  if (!state.subtitleScan || !deletedTargets.length) return;
+function removeResolvedSubtitleTargets(resolvedTargets) {
+  if (!state.subtitleScan || !resolvedTargets.length) return;
 
-  const deletedKeys = new Set(deletedTargets.map((target) => subtitleTargetKey(target)).filter(Boolean));
+  const resolvedKeys = new Set(
+    resolvedTargets.map((target) => subtitleTargetKey(target)).filter(Boolean)
+  );
   const groups = [];
 
   for (const group of state.subtitleScan.groups || []) {
     const subtitles = (group.subtitles || []).filter(
-      (subtitle) => !deletedKeys.has(subtitleTargetKey(subtitle))
+      (subtitle) => !resolvedKeys.has(subtitleTargetKey(subtitle))
     );
 
     if (!subtitles.length || (!group.deleteAll && subtitles.length < 2)) {
@@ -1919,7 +1931,15 @@ async function deleteActiveFile(event) {
   setDeleteDialogBusy(true);
   let keepFailureDialogOpen = false;
   try {
-    const { deleted, deletedTargets, failures, canceled, skipped } =
+    const {
+      deleted,
+      deletedTargets,
+      alreadyAbsent,
+      alreadyAbsentTargets,
+      failures,
+      canceled,
+      skipped
+    } =
       await deleteTargetsWithProgress(
         targets,
         kind,
@@ -1930,27 +1950,35 @@ async function deleteActiveFile(event) {
     if (!keepFailureDialogOpen) elements.deleteDialog.close();
 
     if (kind === "subtitle") {
-      removeDeletedSubtitleTargets(deletedTargets);
+      removeResolvedSubtitleTargets([...deletedTargets, ...alreadyAbsentTargets]);
       renderSubtitleGroups();
     } else if (deletedTargets.length) {
       await scan();
     }
 
     const label = deleteTargetLabel(kind);
+    const absentText = alreadyAbsent ? `; ${alreadyAbsent} already absent` : "";
     if (canceled && failures.length) {
-      const message = `Canceled after deleting ${deleted} ${label}; ${skipped} skipped; ${failures.length} failed. First error: ${failures[0].error.message}`;
+      const message = `Canceled after deleting ${deleted} ${label}${absentText}; ${skipped} skipped; ${failures.length} failed. First error: ${failures[0].error.message}`;
       if (kind === "subtitle") setSubtitleMessage(message, "error");
       else setMessage(message, "error");
     } else if (canceled) {
-      const message = `Canceled after deleting ${deleted} ${label}; ${skipped} skipped.`;
-      if (kind === "subtitle") setSubtitleMessage(message, deleted ? "success" : "");
-      else setMessage(message, deleted ? "success" : "");
+      const message = `Canceled after deleting ${deleted} ${label}${absentText}; ${skipped} skipped.`;
+      if (kind === "subtitle") {
+        setSubtitleMessage(message, deleted || alreadyAbsent ? "success" : "");
+      } else {
+        setMessage(message, deleted || alreadyAbsent ? "success" : "");
+      }
     } else if (bulk && failures.length) {
-      const message = `Deleted ${deleted} ${label}; ${failures.length} failed. First error: ${failures[0].error.message}`;
+      const message = `Deleted ${deleted} ${label}${absentText}; ${failures.length} failed. First error: ${failures[0].error.message}`;
       if (kind === "subtitle") setSubtitleMessage(message, "error");
       else setMessage(message, "error");
     } else if (bulk) {
-      const message = `Deleted ${deleted} rejected ${label}.`;
+      const message = `Deleted ${deleted} rejected ${label}${absentText}.`;
+      if (kind === "subtitle") setSubtitleMessage(message, "success");
+      else setMessage(message, "success");
+    } else if (alreadyAbsent) {
+      const message = `${deleteTargetName(targets[0], kind)} was already absent in Plex.`;
       if (kind === "subtitle") setSubtitleMessage(message, "success");
       else setMessage(message, "success");
     }

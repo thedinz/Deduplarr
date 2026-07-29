@@ -77,6 +77,22 @@ function streamDeletePath(streamKey) {
   }
 }
 
+function subtitleDeleteTargets(streamId, extension, streamKey) {
+  const targets = [];
+  const addTarget = (target) => {
+    if (target && !targets.includes(target)) targets.push(target);
+  };
+  const id = text(streamId).trim().replace(/\.[a-z0-9]+$/i, "");
+  const ext = cleanExtension(extension, "srt");
+
+  addTarget(streamDeletePath(streamKey));
+  if (id) {
+    addTarget(`/library/streams/${encodeURIComponent(id)}.${encodeURIComponent(ext)}`);
+    addTarget(`/library/streams/${encodeURIComponent(id)}`);
+  }
+  return targets;
+}
+
 function subtitleExtension(stream) {
   const keyExtension = extensionFromPath(text(stream?.key).split(/[?#]/)[0]);
   return cleanExtension(
@@ -1012,14 +1028,25 @@ export class PlexClient {
   }
 
   async deleteSubtitleStream(streamId, extension = "srt", streamKey = "") {
-    const id = text(streamId).trim();
-    const targetFromKey = streamDeletePath(streamKey);
-    if (!id && !targetFromKey) {
+    const targets = subtitleDeleteTargets(streamId, extension, streamKey);
+    if (!targets.length) {
       throw new Error("A Plex subtitle stream ID is required for subtitle deletion.");
     }
 
-    const target = targetFromKey || `/library/streams/${encodeURIComponent(id)}`;
-    await this.request(target, {}, { method: "DELETE" });
-    return { deleted: true, target };
+    for (const target of targets) {
+      try {
+        await this.request(target, {}, { method: "DELETE" });
+        return { deleted: true, target };
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+    }
+
+    return {
+      deleted: false,
+      alreadyAbsent: true,
+      target: targets.at(-1),
+      attemptedTargets: targets
+    };
   }
 }
