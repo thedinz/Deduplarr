@@ -244,6 +244,15 @@ function activityLibrarySectionId(activity) {
   );
 }
 
+export function isLibraryScanActivity(activity) {
+  const type = text(activity?.type).toLowerCase();
+  return type.includes("library") && (
+    type.includes("update") ||
+    type.includes("refresh") ||
+    type.includes("scan")
+  );
+}
+
 export function findLibraryActivity(activities, library) {
   const libraryKey = text(library?.key || library).trim();
   const libraryTitle = text(library?.title).trim().toLowerCase();
@@ -251,19 +260,11 @@ export function findLibraryActivity(activities, library) {
   const bySection = candidates.filter(
     (activity) => activityLibrarySectionId(activity) === libraryKey
   );
-  const likelyLibraryActivity = (activity) => {
-    const type = text(activity?.type).toLowerCase();
-    return type.includes("library") && (
-      type.includes("update") ||
-      type.includes("refresh") ||
-      type.includes("scan")
-    );
-  };
 
   return (
-    bySection.find(likelyLibraryActivity) ||
+    bySection.find(isLibraryScanActivity) ||
     candidates.find((activity) => {
-      if (!libraryTitle || !likelyLibraryActivity(activity)) return false;
+      if (!libraryTitle || !isLibraryScanActivity(activity)) return false;
       return [activity?.title, activity?.subtitle]
         .map((value) => text(value).trim().toLowerCase())
         .includes(libraryTitle);
@@ -614,6 +615,7 @@ export class PlexClient {
       scanner: text(directory.scanner),
       refreshing: booleanValue(directory.refreshing),
       uuid: text(directory.uuid),
+      scannedAt: number(directory.scannedAt),
       locations: asArray(directory.Location).map((location) => text(location.path))
     }));
   }
