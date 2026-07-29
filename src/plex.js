@@ -232,6 +232,47 @@ function directoryList(container) {
   return asArray(container?.Directory);
 }
 
+function activityLibrarySectionId(activity) {
+  const context = activity?.context || activity?.Context || {};
+  return text(
+    activity?.librarySectionId ||
+      context.librarySectionID ||
+      context.librarySectionId ||
+      context.librarySectionKey ||
+      context.sectionID ||
+      context.sectionId
+  );
+}
+
+export function isLibraryScanActivity(activity) {
+  const type = text(activity?.type).toLowerCase();
+  return type.includes("library") && (
+    type.includes("update") ||
+    type.includes("refresh") ||
+    type.includes("scan")
+  );
+}
+
+export function findLibraryActivity(activities, library) {
+  const libraryKey = text(library?.key || library).trim();
+  const libraryTitle = text(library?.title).trim().toLowerCase();
+  const candidates = asArray(activities);
+  const bySection = candidates.filter(
+    (activity) => activityLibrarySectionId(activity) === libraryKey
+  );
+
+  return (
+    bySection.find(isLibraryScanActivity) ||
+    candidates.find((activity) => {
+      if (!libraryTitle || !isLibraryScanActivity(activity)) return false;
+      return [activity?.title, activity?.subtitle]
+        .map((value) => text(value).trim().toLowerCase())
+        .includes(libraryTitle);
+    }) ||
+    null
+  );
+}
+
 function streamGroups(part) {
   const streams = asArray(part?.Stream);
   return {
@@ -515,7 +556,7 @@ export class PlexClient {
     return url;
   }
 
-  async request(path, params = {}, options = {}) {
+  async requestWithResponse(path, params = {}, options = {}) {
     const response = await fetch(this.buildUrl(path, params), {
       method: options.method || "GET",
       headers: {
@@ -537,13 +578,18 @@ export class PlexClient {
       throw error;
     }
 
-    if (!body) return {};
+    if (!body) return { data: {}, response };
 
     try {
-      return JSON.parse(body);
+      return { data: JSON.parse(body), response };
     } catch {
-      return parser.parse(body);
+      return { data: parser.parse(body), response };
     }
+  }
+
+  async request(path, params = {}, options = {}) {
+    const { data } = await this.requestWithResponse(path, params, options);
+    return data;
   }
 
   async serverInfo() {
@@ -567,8 +613,43 @@ export class PlexClient {
       type: text(directory.type),
       agent: text(directory.agent),
       scanner: text(directory.scanner),
+      refreshing: booleanValue(directory.refreshing),
+      uuid: text(directory.uuid),
+      scannedAt: number(directory.scannedAt),
       locations: asArray(directory.Location).map((location) => text(location.path))
     }));
+  }
+
+  async activities() {
+    const data = await this.request("/activities");
+    const container = data.MediaContainer || data;
+    return asArray(container.Activity).map((activity) => ({
+      uuid: text(activity.uuid),
+      type: text(activity.type),
+      cancellable: booleanValue(activity.cancellable),
+      title: text(activity.title),
+      subtitle: text(activity.subtitle),
+      progress: number(activity.progress, -1),
+      context: activity.Context || activity.context || {},
+      librarySectionId: activityLibrarySectionId(activity)
+    }));
+  }
+
+  async refreshLibrary(library) {
+    const libraryKey = text(library?.key).trim();
+    if (!libraryKey) throw new Error("Plex library key is required.");
+
+    const { response } = await this.requestWithResponse(
+      `/library/sections/${encodeURIComponent(libraryKey)}/refresh`,
+      {},
+      { method: "POST" }
+    );
+
+    return {
+      libraryKey,
+      libraryTitle: text(library?.title, `Library ${libraryKey}`),
+      activityId: text(response.headers.get("X-Plex-Activity"))
+    };
   }
 
   async listSectionItems(library, onlyDuplicates = true, onPage = () => {}) {

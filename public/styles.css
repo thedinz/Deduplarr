@@ -246,6 +246,10 @@ button {
   background: var(--panel);
 }
 
+.global-scan-progress {
+  margin: 18px 22px 0;
+}
+
 .scan-progress-header {
   display: flex;
   align-items: center;
@@ -276,6 +280,20 @@ button {
   height: 100%;
   background: var(--accent);
   transition: width 180ms ease;
+}
+
+.scan-progress-fill.indeterminate {
+  width: 35% !important;
+  animation: indeterminate-progress 1.25s ease-in-out infinite;
+}
+
+@keyframes indeterminate-progress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 
 .delete-progress-panel {

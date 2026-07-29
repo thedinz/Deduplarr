@@ -9,6 +9,7 @@ Deduplarr is a Docker Compose-first Plex duplicate cleanup companion with an int
 - Keep preferences for media containers, video codecs, audio codecs, subtitle languages, subtitle formats, and subtitle flags.
 - Optional subtitle cleanup mode for non-preferred languages.
 - Guarded bulk deletion with explicit confirmation, progress, cancel support, retry handling, and sampled failure details.
+- On-demand Plex library scans for selected libraries with Plex activity progress.
 - Scheduled media and subtitle scans with off, daily, weekly, and monthly options plus time-of-day controls.
 - Built-in login with optional reverse-proxy header authentication.
 
@@ -23,6 +24,8 @@ Deletion is different: Deduplarr asks Plex to delete the selected media version 
 The Media Files page finds duplicate media versions and helps choose which version to keep. Manual mode lets you decide group by group. Auto mode applies the configured keep preferences, selects suggested keepers, and enables a guarded bulk delete for rejected versions.
 
 The Subtitle Files page audits external subtitle sidecars only. Embedded and burned-in subtitles are ignored because Plex cannot remove them as standalone files. Deduplarr groups sidecars by media item, part, language, forced status, and SDH/CC status, then suggests a keeper based on subtitle preferences and Plex stream details. If enabled, non-preferred subtitle languages can be marked for full cleanup even when no preferred-language subtitle exists for that item.
+
+Use the top-bar **Scan Plex** action to refresh the selected Plex libraries before either Deduplarr scan. Deduplarr refreshes selected libraries sequentially so queued scans are not mistaken for completed scans. It tracks activity IDs returned by Plex, can match activities by library section, and falls back to each section's `refreshing` and `scannedAt` state. When Plex does not expose numeric progress, Deduplarr shows indeterminate progress until completion can be confirmed.
 
 Bulk deletes require typing `DELETE ALL`. While deletion is running, the dialog shows progress, lets you cancel remaining work, retries transient transport failures, and keeps sampled failure details visible when Plex or the browser cannot complete a request.
 

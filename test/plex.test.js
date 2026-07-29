@@ -1,6 +1,165 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PlexClient } from "../src/plex.js";
+import { findLibraryActivity, PlexClient } from "../src/plex.js";
+
+test("refreshLibrary starts a Plex section scan and returns its activity ID", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url: String(url), options };
+    return new Response("", {
+      status: 200,
+      headers: { "X-Plex-Activity": "activity-123" }
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const result = await client.refreshLibrary({ key: "7", title: "Movies" });
+
+  assert.equal(request.options.method, "POST");
+  assert.equal(
+    request.url,
+    "http://plex.example:32400/library/sections/7/refresh?X-Plex-Token=secret"
+  );
+  assert.deepEqual(result, {
+    libraryKey: "7",
+    libraryTitle: "Movies",
+    activityId: "activity-123"
+  });
+});
+
+test("refreshLibrary succeeds when Plex omits the activity header", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const result = await client.refreshLibrary({ key: "7", title: "Movies" });
+
+  assert.deepEqual(result, {
+    libraryKey: "7",
+    libraryTitle: "Movies",
+    activityId: ""
+  });
+});
+
+test("activities exposes Plex scan progress and indeterminate states", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        MediaContainer: {
+          Activity: [
+            {
+              uuid: "activity-123",
+              type: "library.update.section",
+              cancellable: true,
+              title: "Scanning",
+              subtitle: "Movies",
+              progress: 42,
+              Context: { librarySectionID: 7 }
+            },
+            {
+              uuid: "activity-456",
+              type: "library.update.section",
+              progress: -1
+            }
+          ]
+        }
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const activities = await client.activities();
+
+  assert.equal(activities[0].progress, 42);
+  assert.equal(activities[0].cancellable, true);
+  assert.deepEqual(activities[0].context, { librarySectionID: 7 });
+  assert.equal(activities[0].librarySectionId, "7");
+  assert.equal(activities[1].progress, -1);
+});
+
+test("findLibraryActivity matches a scan by library context without a response header", () => {
+  const activity = findLibraryActivity(
+    [
+      {
+        uuid: "unrelated",
+        type: "media.generate.credits",
+        subtitle: "Movies",
+        context: { librarySectionID: "7" }
+      },
+      {
+        uuid: "scan-activity",
+        type: "library.update.section",
+        title: "Scanning",
+        subtitle: "Movies",
+        progress: 27,
+        context: { librarySectionID: "7" }
+      }
+    ],
+    { key: "7", title: "Movies" }
+  );
+
+  assert.equal(activity.uuid, "scan-activity");
+  assert.equal(activity.progress, 27);
+});
+
+test("libraries exposes Plex's refreshing scan state", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        MediaContainer: {
+          Directory: [
+            {
+              key: "7",
+              title: "Movies",
+              type: "movie",
+              refreshing: true,
+              uuid: "library-uuid"
+            }
+          ]
+        }
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const libraries = await client.libraries();
+
+  assert.equal(libraries[0].refreshing, true);
+  assert.equal(libraries[0].uuid, "library-uuid");
+});
 
 test("deleteMedia uses Plex's media-version deletion endpoint", async (t) => {
   const originalFetch = globalThis.fetch;
