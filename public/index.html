@@ -282,7 +282,8 @@
               <p>Schedule Deduplarr after Plex and post-processing jobs normally finish. If Plex scans at 3:00 AM and Tdarr often runs afterward, give Deduplarr a buffer instead of scheduling it at the same time.</p>
               <ul class="instruction-list">
                 <li>Media and subtitle schedules are separate.</li>
-                <li>Scheduled scans use the server container's local time.</li>
+                <li>Scheduled scans use the container's time zone. Set <code>TZ</code> on the container; Settings shows the active zone.</li>
+                <li>The latest scheduled results load automatically when you open Media Files or Subtitle Files.</li>
                 <li>Monthly schedules on days beyond the current month run on that month's last day.</li>
                 <li>Scheduled Deduplarr scans do not force Plex to scan first.</li>
               </ul>
@@ -319,7 +320,7 @@
             <div class="settings-section">
               <div class="section-heading">
                 <h2>Scan Schedules</h2>
-                <span class="section-status">Server time</span>
+                <span id="scheduleTimeZone" class="section-status">Server time</span>
               </div>
               <div class="schedule-block">
                 <div class="schedule-heading">
@@ -509,6 +510,10 @@
                 <label>
                   <span>External user headers</span>
                   <input id="externalHeadersInput" name="externalUserHeaders" placeholder="x-forwarded-user, x-auth-request-user">
+                </label>
+                <label class="full-width-field">
+                  <span>Trusted proxy addresses</span>
+                  <input id="trustedProxiesInput" name="trustedProxies" placeholder="172.18.0.0/16, 192.168.1.5" title="IPs or CIDR ranges allowed to send user headers and X-Forwarded-* headers. Narrow this to your reverse proxy's address.">
                 </label>
               </div>
               <div class="field-grid password-grid">
