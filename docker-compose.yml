@@ -1,6 +1,6 @@
 services:
   deduplarr:
-    image: ghcr.io/thedinz/deduplarr:dev
+    image: ghcr.io/thedinz/deduplarr:latest
     container_name: deduplarr
     ports:
       - "7889:7889"
