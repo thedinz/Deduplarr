@@ -220,6 +220,20 @@
           <div class="instructions-panel">
             <section class="instructions-section first-section">
               <div class="section-heading">
+                <h2>Getting Started</h2>
+                <span class="section-status">First-time setup</span>
+              </div>
+              <p>Deduplarr finds items with more than one media version and media files with duplicate external subtitles, scores each copy, suggests which to keep, and asks Plex to delete the rest.</p>
+              <ol class="instruction-steps">
+                <li>In <strong>Settings → Authentication</strong>, change the default <code>admin</code> / <code>admin</code> password.</li>
+                <li>In <strong>Settings → Plex</strong>, enter your Plex URL and token, click <strong>Test</strong>, then <strong>Save</strong>.</li>
+                <li>Open <strong>Media Files</strong> or <strong>Subtitle Files</strong> and click <strong>Scan</strong>.</li>
+                <li>When you're ready to delete, turn on <strong>Enable delete buttons</strong> in Settings, and turn on <strong>Allow media deletion</strong> in Plex (Settings → Library).</li>
+              </ol>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
                 <h2>Before You Scan</h2>
                 <span class="section-status">Plex is the source of truth</span>
               </div>
@@ -267,10 +281,25 @@
               </div>
               <ul class="instruction-list">
                 <li>Media deletion removes whole Plex media versions, not individual tracks inside a file.</li>
+                <li>A movie split into several files (<code>cd1</code>/<code>cd2</code>) is one version. Its parts are never offered for deletion.</li>
                 <li>Subtitle cleanup targets external sidecar subtitle files only.</li>
                 <li>Embedded and burned-in subtitles are ignored because Plex cannot delete them as standalone sidecars.</li>
-                <li>Plex must have delete permission and filesystem write access to the target path.</li>
+                <li>Subtitles with no language tag are never removed by <strong>Delete non-preferred languages</strong>.</li>
+                <li>Plex must have <strong>Allow media deletion</strong> turned on and filesystem write access to the target path.</li>
                 <li>If a delete fails, check the sampled failure detail and the Deduplarr server log before retrying in bulk.</li>
+              </ul>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Delete Safety</h2>
+                <span class="section-status">Checked on every delete</span>
+              </div>
+              <p>Before each media delete, Deduplarr asks Plex for the item's current versions. It refuses to delete:</p>
+              <ul class="instruction-list">
+                <li>The version you chose to keep, or any part of it.</li>
+                <li>The last remaining copy of an item.</li>
+                <li>Anything at all, if your keeper has disappeared since the scan. Rescan and try again.</li>
               </ul>
             </section>
 
@@ -283,9 +312,21 @@
               <ul class="instruction-list">
                 <li>Media and subtitle schedules are separate.</li>
                 <li>Scheduled scans use the container's time zone. Set <code>TZ</code> on the container; Settings shows the active zone.</li>
-                <li>The latest scheduled results load automatically when you open Media Files or Subtitle Files.</li>
+                <li>The latest scheduled results load automatically when you open Media Files or Subtitle Files. They're kept until the container restarts.</li>
                 <li>Monthly schedules on days beyond the current month run on that month's last day.</li>
                 <li>Scheduled Deduplarr scans do not force Plex to scan first.</li>
+              </ul>
+            </section>
+
+            <section class="instructions-section">
+              <div class="section-heading">
+                <h2>Sign-in &amp; Access</h2>
+                <span class="section-status">Authentication</span>
+              </div>
+              <ul class="instruction-list">
+                <li>After 10 failed sign-ins from one address, that address is blocked for 15 minutes.</li>
+                <li>Changing the username, password, or auth mode signs out every other session.</li>
+                <li>With reverse-proxy auth, user headers are only trusted from the <strong>trusted proxy addresses</strong> in Settings. Narrow the list to your proxy's address and don't expose port 7889 directly.</li>
               </ul>
             </section>
           </div>
