@@ -917,6 +917,10 @@ button {
   grid-template-columns: minmax(150px, 0.45fr) minmax(180px, 0.55fr) minmax(260px, 1fr);
 }
 
+.auth-grid .full-width-field {
+  grid-column: 1 / -1;
+}
+
 .preferences-grid {
   grid-template-columns: minmax(150px, 0.5fr) repeat(3, minmax(180px, 1fr));
 }

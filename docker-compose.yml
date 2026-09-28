@@ -7,7 +7,12 @@ services:
     environment:
       PORT: "7889"
       CONFIG_DIR: /config
-      # Optional: persist browser sessions across container restarts.
+      # Scheduled scans run in this time zone.
+      TZ: "Etc/UTC"
+      # User and group that own /config and run the app (Unraid: 99 / 100).
+      PUID: "1000"
+      PGID: "1000"
+      # Optional: override the generated session signing secret.
       # SESSION_SECRET: change-me-to-a-long-random-string
     volumes:
       - ./config:/config

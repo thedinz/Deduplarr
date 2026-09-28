@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { isUnknownLanguage, languagesMatch } from "./language.js";
 import { scoreMedia } from "./scoring.js";
 
 const parser = new XMLParser({
@@ -176,27 +177,21 @@ function subtitlePreferenceMatches(record, preferences = {}) {
   const languages = normalizedPreferenceList(preferences.languages);
   const formats = normalizedPreferenceList(preferences.formats);
   const flags = normalizedPreferenceList(preferences.flags);
-  const languageValues = [
-    record.languageCode,
-    record.language,
-    record.languageTag
-  ]
-    .map((value) => text(value).trim().toLowerCase())
-    .filter(Boolean);
+  const languageValues = subtitleLanguageValues(record);
   const formatValues = [record.extension, record.codec, record.format]
-    .map((value) => text(value).trim().replace(/^\./, "").toLowerCase())
+    .map((value) => cleanExtension(value))
     .filter(Boolean);
   const flagValues = subtitleFlagValues(record);
 
   for (const preference of languages) {
-    if (languageValues.some((value) => value === preference || value.includes(preference))) {
+    if (languagesMatch(preference, languageValues)) {
       reasons.push(`Preferred ${record.language || preference.toUpperCase()}`);
       break;
     }
   }
 
   for (const preference of formats) {
-    if (formatValues.some((value) => value === preference || value.includes(preference))) {
+    if (formatValues.includes(cleanExtension(preference))) {
       reasons.push(`Preferred ${preference.toUpperCase()}`);
       break;
     }
@@ -212,24 +207,26 @@ function subtitlePreferenceMatches(record, preferences = {}) {
   return reasons;
 }
 
+function subtitleLanguageValues(record) {
+  return [record.languageCode, record.language, record.languageTag]
+    .map((value) => text(value).trim())
+    .filter(Boolean);
+}
+
 function subtitleLanguageMatchesPreferences(record, preferences = {}) {
   const languages = normalizedPreferenceList(preferences.languages);
-  if (!languages.length) return false;
-  const languageValues = [
-    record.languageCode,
-    record.language,
-    record.languageTag
-  ]
-    .map((value) => text(value).trim().toLowerCase())
-    .filter(Boolean);
-  return languages.some((preference) =>
-    languageValues.some((value) => value === preference || value.includes(preference))
-  );
+  const languageValues = subtitleLanguageValues(record);
+  return languages.some((preference) => languagesMatch(preference, languageValues));
 }
 
 function shouldDeleteAllSubtitleGroup(records, preferences = {}) {
   const languages = normalizedPreferenceList(preferences.languages);
   if (!preferences.deleteNonPreferredLanguages || !languages.length) return false;
+  // Untagged sidecars (plain movie.srt) are often the primary subtitle, so an
+  // unknown language is never treated as non-preferred.
+  if (records.some((record) => isUnknownLanguage(subtitleLanguageValues(record)))) {
+    return false;
+  }
   return records.every((record) => !subtitleLanguageMatchesPreferences(record, preferences));
 }
 
@@ -387,11 +384,19 @@ function flattenVersions(item, library, keepPreferences = {}) {
   return records.sort((a, b) => b.score.preferenceRank - a.score.preferenceRank);
 }
 
-function duplicateReason(item, files, cameFromDuplicateFilter) {
-  const mediaCount = asArray(item.Media).length;
-  if (mediaCount > 1) return `${mediaCount} media versions`;
-  if (cameFromDuplicateFilter && files.length > 1) return `${files.length} file parts`;
-  return "multiple files";
+function duplicateReason(item) {
+  return `${asArray(item.Media).length} media versions`;
+}
+
+// Bytes freed by deleting every version except the suggested keeper. Parts of
+// the keeper's own media version are not reclaimable.
+export function groupReclaimableBytes(group) {
+  const keeper = group.files.find((file) => file.id === group.bestFileId);
+  const keeperMedia = keeper ? keeper.mediaId || keeper.mediaIndex : null;
+  return group.files.reduce((sum, file) => {
+    if (keeper && (file.mediaId || file.mediaIndex) === keeperMedia) return sum;
+    return sum + number(file.size);
+  }, 0);
 }
 
 function subtitleScore(record, preferences = {}) {
@@ -531,6 +536,13 @@ function flattenSidecarSubtitles(item, library, subtitlePreferences = {}) {
     scannedSubtitles,
     ignoredNonSidecar
   };
+}
+
+function deleteGuardError(message, target) {
+  const error = new Error(message);
+  error.status = 409;
+  error.target = target;
+  return error;
 }
 
 async function mapLimit(items, limit, mapper) {
@@ -693,7 +705,12 @@ export class PlexClient {
       items.push(...page);
 
       const size = number(container.size, page.length);
-      total = number(container.totalSize, start + size);
+      // Without totalSize, keep paging until Plex returns a short page.
+      if (container.totalSize !== undefined) {
+        total = number(container.totalSize, start + size);
+      } else {
+        total = size < this.pageSize ? start + size : Infinity;
+      }
       onPage({
         loaded: items.length,
         total,
@@ -707,7 +724,7 @@ export class PlexClient {
   }
 
   async itemDetails(ratingKey) {
-    const data = await this.request(`/library/metadata/${ratingKey}`, {
+    const data = await this.request(`/library/metadata/${encodeURIComponent(ratingKey)}`, {
       includeGuids: 1,
       includeAdvanced: 1,
       checkFiles: 1
@@ -739,7 +756,6 @@ export class PlexClient {
 
     for (const [libraryIndex, library] of selected.entries()) {
       let items = [];
-      let usedDuplicateFilter = true;
       const libraryBase = 5 + (libraryIndex / totalLibraries) * 90;
       const librarySpan = 90 / totalLibraries;
       const progressAt = (fraction) =>
@@ -758,8 +774,7 @@ export class PlexClient {
             message: `Reading ${library.title}: ${loaded}/${total || "?"} items`
           });
         });
-      } catch (error) {
-        usedDuplicateFilter = false;
+      } catch {
         try {
           items = await this.listSectionItems(library, false, ({ loaded, total }) => {
             const fraction = total ? Math.min(loaded / total, 1) : 0.2;
@@ -778,6 +793,7 @@ export class PlexClient {
       }
 
       let detailedCount = 0;
+      const detailFailures = [];
       onProgress({
         progress: progressAt(0.35),
         message: `Inspecting ${items.length} duplicate candidates in ${library.title}`
@@ -786,7 +802,8 @@ export class PlexClient {
         try {
           if (!item.ratingKey) return item;
           return (await this.itemDetails(item.ratingKey)) || item;
-        } catch {
+        } catch (error) {
+          detailFailures.push(`${groupTitle(item)}: ${error.message}`);
           return item;
         } finally {
           detailedCount += 1;
@@ -797,18 +814,23 @@ export class PlexClient {
           });
         }
       });
+      if (detailFailures.length) {
+        errors.push({
+          library: library.title,
+          message: `${detailFailures.length} of ${items.length} items could not be inspected and may be missing from results (first: ${detailFailures[0]})`
+        });
+      }
 
       onProgress({
         progress: progressAt(0.84),
         message: `Scoring duplicates in ${library.title}`
       });
       for (const item of detailed) {
+        // Only multiple media versions are duplicates. Several parts of one
+        // version (cd1/cd2) are a single copy, and deleting "the other part"
+        // would delete that whole version.
+        if (asArray(item.Media).length < 2) continue;
         const files = flattenVersions(item, library, this.keepPreferences);
-        const mediaCount = asArray(item.Media).length;
-        const isDuplicate =
-          mediaCount > 1 || (usedDuplicateFilter && files.length > 1);
-
-        if (!isDuplicate || files.length < 2) continue;
 
         allGroups.push({
           id: `${library.key}:${item.ratingKey}`,
@@ -822,7 +844,7 @@ export class PlexClient {
           art: item.art || item.grandparentArt || "",
           year: item.year || "",
           duration: number(item.duration),
-          reason: duplicateReason(item, files, usedDuplicateFilter),
+          reason: duplicateReason(item),
           bestFileId: files[0]?.id || "",
           suggestedFileId: files[0]?.id || "",
           files
@@ -846,10 +868,10 @@ export class PlexClient {
         libraries: selected.length,
         groups: allGroups.length,
         files: files.length,
-        reclaimableBytes: files.reduce((sum, file) => {
-          const group = allGroups.find((candidate) => candidate.id === `${file.libraryKey}:${file.ratingKey}`);
-          return group?.bestFileId === file.id ? sum : sum + file.size;
-        }, 0)
+        reclaimableBytes: allGroups.reduce(
+          (sum, group) => sum + groupReclaimableBytes(group),
+          0
+        )
       },
       errors
     };
@@ -911,6 +933,7 @@ export class PlexClient {
 
       totalItems += items.length;
       let detailedCount = 0;
+      const detailFailures = [];
       onProgress({
         progress: progressAt(0.35),
         message: `Inspecting ${items.length} items in ${library.title}`
@@ -919,7 +942,8 @@ export class PlexClient {
         try {
           if (!item.ratingKey) return item;
           return (await this.itemDetails(item.ratingKey)) || item;
-        } catch {
+        } catch (error) {
+          detailFailures.push(`${groupTitle(item)}: ${error.message}`);
           return item;
         } finally {
           detailedCount += 1;
@@ -930,6 +954,12 @@ export class PlexClient {
           });
         }
       });
+      if (detailFailures.length) {
+        errors.push({
+          library: library.title,
+          message: `${detailFailures.length} of ${items.length} items could not be inspected and may be missing from results (first: ${detailFailures[0]})`
+        });
+      }
 
       onProgress({
         progress: progressAt(0.84),
@@ -1015,7 +1045,7 @@ export class PlexClient {
     };
   }
 
-  async deleteMedia(ratingKey, mediaId) {
+  async deleteMedia(ratingKey, mediaId, { keepMediaId = "" } = {}) {
     const metadataId = text(ratingKey).trim();
     const versionId = text(mediaId).trim();
     if (!metadataId || !versionId) {
@@ -1023,6 +1053,30 @@ export class PlexClient {
     }
 
     const target = `/library/metadata/${encodeURIComponent(metadataId)}/media/${encodeURIComponent(versionId)}`;
+    const item = await this.itemDetails(metadataId);
+    if (!item) return { deleted: false, alreadyAbsent: true, target };
+
+    // Re-check against Plex's current state so a stale or tampered request
+    // can never remove the kept version or the last remaining copy.
+    const mediaIds = asArray(item.Media).map((media) => text(media.id));
+    const keepId = text(keepMediaId).trim();
+    if (!mediaIds.includes(versionId)) return { deleted: false, alreadyAbsent: true, target };
+    if (mediaIds.length < 2) {
+      throw deleteGuardError(
+        "Refusing to delete the only remaining media version of this item.",
+        target
+      );
+    }
+    if (keepId && keepId === versionId) {
+      throw deleteGuardError("Refusing to delete the media version selected to keep.", target);
+    }
+    if (keepId && !mediaIds.includes(keepId)) {
+      throw deleteGuardError(
+        "The media version selected to keep no longer exists in Plex. Rescan before deleting.",
+        target
+      );
+    }
+
     await this.request(target, {}, { method: "DELETE" });
     return { deleted: true, target };
   }

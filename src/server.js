@@ -3,14 +3,21 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  assertTokenForPlexUrl,
   getRuntimeConfig,
+  isTrustedProxyAddress,
   markScheduledScanRun,
   publicConfig,
   saveConfig
 } from "./config.js";
 import {
+  clearLoginFailures,
   clearSessionCookie,
   createSessionToken,
+  loginRetryAfterSeconds,
+  loginThrottleKey,
+  recordLoginFailure,
+  revokeSessionFromRequest,
   sessionFromRequest,
   setSessionCookie,
   verifyPassword,
@@ -24,11 +31,15 @@ const rootDir = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 7889);
 const scanJobs = new Map();
+const latestScanResults = new Map();
+const SCAN_KINDS = ["media", "subtitles", "plex"];
 const SCHEDULER_INTERVAL_MS = 60 * 1000;
 let schedulerChecking = false;
 
 app.disable("x-powered-by");
-app.set("trust proxy", true);
+// Only honor X-Forwarded-* from configured proxy networks so clients cannot
+// spoof their IP (login throttling) or the https flag (Secure cookies).
+app.set("trust proxy", (address) => isTrustedProxyAddress(address));
 app.use(express.json({ limit: "1mb" }));
 
 app.use("/vendor/lucide", express.static(path.join(rootDir, "node_modules", "lucide", "dist", "umd")));
@@ -61,6 +72,9 @@ function updateScanJob(id, patch) {
   const job = scanJobs.get(id);
   if (!job) return null;
   Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  // Keep the newest completed result per kind so scheduled scans, and scans
+  // started from another tab, can be loaded by the UI later.
+  if (job.status === "completed") latestScanResults.set(job.kind, job);
   return job;
 }
 
@@ -99,13 +113,35 @@ function startScanJob(kind, config, libraryKeys = [], source = "manual") {
   return job;
 }
 
-function hasActiveScanJob(kind) {
+function activeScanJob(kind) {
   for (const job of scanJobs.values()) {
     if (job.kind === kind && ["queued", "running"].includes(job.status)) {
-      return true;
+      return job;
     }
   }
-  return false;
+  return null;
+}
+
+function hasActiveScanJob(kind) {
+  return Boolean(activeScanJob(kind));
+}
+
+function startManualScan(kind, request, response) {
+  const active = activeScanJob(kind);
+  if (active) {
+    response.status(409).json({
+      error: "A scan of this type is already running. Wait for it to finish.",
+      job: serializeScanJob(active)
+    });
+    return;
+  }
+
+  const config = request.runtimeConfig;
+  const libraryKeys = Array.isArray(request.body?.libraryKeys)
+    ? request.body.libraryKeys.map(String)
+    : [];
+  const job = startScanJob(kind, config, libraryKeys, "manual");
+  response.status(202).json(serializeScanJob(job));
 }
 
 function scheduleTimeParts(time) {
@@ -387,14 +423,18 @@ async function runPlexRefreshJob(id, config, libraryKeys) {
           message: `Finished ${library.title}`
         });
       } catch (error) {
+        // Record the failure and move on so one unconfirmed library does not
+        // stop the remaining libraries from being scanned.
         errors.push({
           libraryKey: String(library.key),
           libraryTitle: library.title,
           message: `Scan was triggered, but completion could not be confirmed: ${error.message}`
         });
-        throw new Error(
-          `Plex scan was triggered for ${library.title}, but completion could not be confirmed: ${error.message}`
-        );
+        updateScanJob(id, {
+          progress: Math.round(((index + 1) / selected.length) * 100),
+          indeterminate: false,
+          message: `Could not confirm ${library.title} finished`
+        });
       }
     }
 
@@ -430,6 +470,7 @@ async function clientFromConfig() {
 }
 
 function plexClientFromInput(input, fallbackConfig) {
+  assertTokenForPlexUrl(input, fallbackConfig);
   return new PlexClient({
     ...fallbackConfig,
     plexUrl: input.plexUrl?.trim() || fallbackConfig.plexUrl,
@@ -448,7 +489,7 @@ async function requireAuth(request, response, next) {
     response.status(401).json({
       error:
         config.auth.mode === "external"
-          ? "External auth user header missing."
+          ? "External auth user header missing, or the request did not come from a trusted proxy address."
           : "Authentication required.",
       authMode: config.auth.mode
     });
@@ -473,7 +514,8 @@ app.get(
       authenticated: Boolean(user),
       user,
       authMode: config.auth.mode,
-      externalUserHeaders: config.auth.externalUserHeaders
+      externalUserHeaders: config.auth.externalUserHeaders,
+      defaultPassword: config.auth.mode === "builtin" && !config.auth.passwordHash
     });
   })
 );
@@ -487,29 +529,50 @@ app.post(
       return;
     }
 
+    const throttleKey = loginThrottleKey(request);
+    const retryAfter = loginRetryAfterSeconds(throttleKey);
+    if (retryAfter) {
+      response.set("Retry-After", String(retryAfter));
+      response.status(429).json({
+        error: `Too many failed sign-in attempts. Try again in ${Math.ceil(retryAfter / 60)} minutes.`
+      });
+      return;
+    }
+
     const username = String(request.body?.username || "");
     const password = String(request.body?.password || "");
     const validUsername = username === config.auth.username;
     const validPassword = await verifyPassword(password, config.auth.passwordHash);
 
     if (!validUsername || !validPassword) {
+      recordLoginFailure(throttleKey);
       response.status(401).json({ error: "Invalid username or password." });
       return;
     }
 
+    clearLoginFailures(throttleKey);
     const token = createSessionToken(
       { username: config.auth.username, authMode: "builtin" },
-      config.sessionSecret
+      config.sessionSecret,
+      config.auth.sessionVersion
     );
     setSessionCookie(response, request, token);
-    response.json({ authenticated: true, user: { username, authMode: "builtin" } });
+    response.json({
+      authenticated: true,
+      user: { username, authMode: "builtin" },
+      defaultPassword: !config.auth.passwordHash
+    });
   })
 );
 
-app.post("/api/logout", (request, response) => {
-  clearSessionCookie(response, request);
-  response.json({ authenticated: false });
-});
+app.post(
+  "/api/logout",
+  asyncRoute(async (request, response) => {
+    revokeSessionFromRequest(request, await getRuntimeConfig());
+    clearSessionCookie(response, request);
+    response.json({ authenticated: false });
+  })
+);
 
 app.use("/api", (request, response, next) => {
   if (["/health", "/session", "/login", "/logout"].includes(request.path)) {
@@ -553,8 +616,22 @@ app.post(
       options.passwordHash = await hashPassword(body.authPassword);
     }
 
-    const saved = await saveConfig(body, options);
-    response.json(publicConfig(saved));
+    await saveConfig(body, options);
+    const savedConfig = await getRuntimeConfig();
+    // Credential or identity changes invalidate old sessions; re-issue one for
+    // the user who made the change so they stay signed in.
+    if (savedConfig.auth.mode === "builtin" && request.user?.authMode === "builtin") {
+      setSessionCookie(
+        response,
+        request,
+        createSessionToken(
+          { username: savedConfig.auth.username, authMode: "builtin" },
+          savedConfig.sessionSecret,
+          savedConfig.auth.sessionVersion
+        )
+      );
+    }
+    response.json(publicConfig(savedConfig));
   })
 );
 
@@ -594,41 +671,28 @@ app.get(
   })
 );
 
-app.post(
-  "/api/scan",
-  asyncRoute(async (request, response) => {
-    const config = request.runtimeConfig || (await getRuntimeConfig());
-    const libraryKeys = Array.isArray(request.body?.libraryKeys)
-      ? request.body.libraryKeys.map(String)
-      : [];
-    const job = startScanJob("media", config, libraryKeys, "manual");
-    response.status(202).json(serializeScanJob(job));
-  })
+app.post("/api/scan", (request, response) => startManualScan("media", request, response));
+
+app.post("/api/subtitle-scan", (request, response) =>
+  startManualScan("subtitles", request, response)
 );
 
-app.post(
-  "/api/subtitle-scan",
-  asyncRoute(async (request, response) => {
-    const config = request.runtimeConfig || (await getRuntimeConfig());
-    const libraryKeys = Array.isArray(request.body?.libraryKeys)
-      ? request.body.libraryKeys.map(String)
-      : [];
-    const job = startScanJob("subtitles", config, libraryKeys, "manual");
-    response.status(202).json(serializeScanJob(job));
-  })
-);
+app.post("/api/plex-scan", (request, response) => startManualScan("plex", request, response));
 
-app.post(
-  "/api/plex-scan",
-  asyncRoute(async (request, response) => {
-    const config = request.runtimeConfig || (await getRuntimeConfig());
-    const libraryKeys = Array.isArray(request.body?.libraryKeys)
-      ? request.body.libraryKeys.map(String)
-      : [];
-    const job = startScanJob("plex", config, libraryKeys, "manual");
-    response.status(202).json(serializeScanJob(job));
-  })
-);
+app.get("/api/scan-results/:kind", (request, response) => {
+  const { kind } = request.params;
+  if (!SCAN_KINDS.includes(kind)) {
+    response.status(404).json({ error: "Unknown scan kind." });
+    return;
+  }
+
+  const latest = latestScanResults.get(kind);
+  const active = activeScanJob(kind);
+  response.json({
+    latest: latest ? serializeScanJob(latest) : null,
+    active: active ? serializeScanJob(active) : null
+  });
+});
 
 app.get(
   "/api/scan/:scanId",
@@ -676,7 +740,7 @@ app.post(
     if (!config.allowDeletes) {
       response.status(403).json({
         error:
-          "Destructive actions are disabled. Set ENABLE_DESTRUCTIVE_ACTIONS=true or enable deletes in Settings."
+          "Destructive actions are disabled. Enable deletes in Settings."
       });
       return;
     }
@@ -686,12 +750,18 @@ app.post(
       return;
     }
 
+    if (!request.body?.keepMediaId) {
+      response.status(400).json({ error: "Select a version to keep before deleting." });
+      return;
+    }
+
     const client = new PlexClient(config);
     try {
       response.json(
         await client.deleteMedia(
           String(request.body?.ratingKey || ""),
-          String(request.body?.mediaId || "")
+          String(request.body?.mediaId || ""),
+          { keepMediaId: String(request.body?.keepMediaId || "") }
         )
       );
     } catch (error) {
@@ -715,7 +785,7 @@ app.post(
     if (!config.allowDeletes) {
       response.status(403).json({
         error:
-          "Destructive actions are disabled. Set ENABLE_DESTRUCTIVE_ACTIONS=true or enable deletes in Settings."
+          "Destructive actions are disabled. Enable deletes in Settings."
       });
       return;
     }
