@@ -11,6 +11,8 @@ const state = {
   selectedLibraries: new Set(),
   scan: null,
   subtitleScan: null,
+  scanResultAt: "",
+  subtitleScanResultAt: "",
   groupSelections: new Map(),
   subtitleGroupSelections: new Map(),
   selectionMode: "manual",
@@ -168,6 +170,8 @@ const elements = {
   authModeInput: document.querySelector("#authModeInput"),
   authUsernameInput: document.querySelector("#authUsernameInput"),
   externalHeadersInput: document.querySelector("#externalHeadersInput"),
+  trustedProxiesInput: document.querySelector("#trustedProxiesInput"),
+  scheduleTimeZone: document.querySelector("#scheduleTimeZone"),
   currentPasswordInput: document.querySelector("#currentPasswordInput"),
   authPasswordInput: document.querySelector("#authPasswordInput"),
   authPasswordConfirmInput: document.querySelector("#authPasswordConfirmInput"),
@@ -229,6 +233,7 @@ async function api(path, options = {}) {
     const error = new Error(data.error || `${response.status} ${response.statusText}`);
     error.status = response.status;
     error.details = data.details || {};
+    error.data = data;
     throw error;
   }
   return data;
@@ -632,6 +637,9 @@ function showApp(session) {
   elements.loginShell.classList.add("is-hidden");
   elements.appShell.classList.remove("is-hidden");
   elements.userBadge.textContent = session?.user?.username || "admin";
+  if (session?.defaultPassword) {
+    setMessage("You are signed in with the default admin/admin password. Change it in Settings.", "error");
+  }
   icons();
 }
 
@@ -721,6 +729,8 @@ function renderConfig() {
   elements.authModeInput.value = state.config.auth?.mode || "builtin";
   elements.authUsernameInput.value = state.config.auth?.username || "admin";
   elements.externalHeadersInput.value = (state.config.auth?.externalUserHeaders || []).join(", ");
+  elements.trustedProxiesInput.value = (state.config.auth?.trustedProxies || []).join(", ");
+  elements.scheduleTimeZone.textContent = `Server time (${state.config.serverTimeZone || "UTC"})`;
   elements.tokenStatus.textContent = state.config.hasToken ? "Token saved" : "No token saved";
   elements.authStatus.textContent =
     state.config.auth?.mode === "external" ? "External" : "Built-in";
@@ -778,6 +788,7 @@ function plexFormPayload(includeAuth = false) {
     payload.authMode = elements.authModeInput.value;
     payload.authUsername = elements.authUsernameInput.value;
     payload.externalUserHeaders = elements.externalHeadersInput.value;
+    payload.trustedProxies = elements.trustedProxiesInput.value;
     if (elements.authPasswordInput.value) {
       payload.currentPassword = elements.currentPasswordInput.value;
       payload.authPassword = elements.authPasswordInput.value;
@@ -917,16 +928,23 @@ function keepButton(group, file, isSelectedKeep) {
   `;
 }
 
-function deleteButton(file, selectedFileId) {
+function deleteButton(group, file, selectedFileId) {
+  const keeper = group.files.find((candidate) => candidate.id === selectedFileId);
   const isSelectedKeep = file.id === selectedFileId;
-  const disabled = !state.config?.allowDeletes || !selectedFileId || isSelectedKeep ? "disabled" : "";
+  // Deleting any part of the kept version would delete the kept version itself.
+  const isKeeperVersion =
+    !isSelectedKeep && Boolean(keeper) && mediaTargetKey(file) === mediaTargetKey(keeper);
+  const disabled =
+    !state.config?.allowDeletes || !keeper || isSelectedKeep || isKeeperVersion ? "disabled" : "";
   const title = !state.config?.allowDeletes
     ? "Deletes disabled"
-    : !selectedFileId
+    : !keeper
       ? "Choose keeper first"
       : isSelectedKeep
         ? "Selected keeper"
-        : "Delete";
+        : isKeeperVersion
+          ? "Part of the kept version"
+          : "Delete";
   return `
     <button class="icon-button delete-file-button" data-file-id="${escapeHtml(file.id)}" ${disabled} title="${title}">
       <i data-lucide="trash-2"></i>
@@ -955,7 +973,13 @@ function rejectedMediaTargets() {
 
       const existing = targets.get(target);
       if (existing) existing.size += Number(file.size || 0);
-      else targets.set(target, { ...file, size: Number(file.size || 0) });
+      else {
+        targets.set(target, {
+          ...file,
+          size: Number(file.size || 0),
+          keepMediaId: keeper.mediaId
+        });
+      }
     }
   }
 
@@ -1059,7 +1083,7 @@ function renderGroups() {
               <div class="file-size">${formatBytes(file.size)}</div>
               <div class="row-actions">
                 ${keepButton(group, file, isSelectedKeep)}
-                ${deleteButton(file, selectedFileId)}
+                ${deleteButton(group, file, selectedFileId)}
               </div>
             </div>
           `;
@@ -1283,7 +1307,16 @@ function findSubtitle(subtitleId) {
 function openDelete(fileId) {
   const file = findFile(fileId);
   if (!file) return;
-  state.activeDelete = { kind: "media", mode: "single", targets: [file] };
+  const group = (state.scan?.groups || []).find((candidate) => candidate.files.includes(file));
+  const keeper = group?.files.find(
+    (candidate) => candidate.id === state.groupSelections.get(group.id)
+  );
+  if (!keeper || mediaTargetKey(keeper) === mediaTargetKey(file)) return;
+  state.activeDelete = {
+    kind: "media",
+    mode: "single",
+    targets: [{ ...file, keepMediaId: keeper.mediaId }]
+  };
   prepareDeleteDialog();
   elements.deleteDialogTitle.textContent = "Delete File";
   elements.deleteFileName.textContent = file.fileName || file.file;
@@ -1380,6 +1413,7 @@ async function refreshConnection() {
   const online = await loadStatus();
   if (online) {
     await loadLibraries();
+    await loadLatestScanResults();
   } else {
     state.libraries = [];
     renderLibraries();
@@ -1401,12 +1435,7 @@ async function plexScan() {
   }, 1000);
 
   try {
-    state.plexScanJob = await api("/api/plex-scan", {
-      method: "POST",
-      body: JSON.stringify({
-        libraryKeys: [...state.selectedLibraries]
-      })
-    });
+    state.plexScanJob = await startOrAttachJob("/api/plex-scan");
     renderPlexScanProgress(state.plexScanJob);
 
     while (["queued", "running"].includes(state.plexScanJob.status)) {
@@ -1444,6 +1473,88 @@ async function plexScan() {
   }
 }
 
+async function startOrAttachJob(path) {
+  try {
+    return await api(path, {
+      method: "POST",
+      body: JSON.stringify({
+        libraryKeys: [...state.selectedLibraries]
+      })
+    });
+  } catch (error) {
+    // Another tab or a scheduled run already started this scan; follow it.
+    if (error.status === 409 && error.data?.job) return error.data.job;
+    throw error;
+  }
+}
+
+function applyMediaScanResult(result) {
+  state.scan = result;
+  state.scanResultAt = result?.scannedAt || "";
+  state.preferenceOptions = {
+    ...state.preferenceOptions,
+    ...preferenceValuesFromScan(state.scan)
+  };
+  renderPreferenceControls();
+  initializeGroupSelections();
+  renderStats(state.scan.stats);
+  renderGroups();
+}
+
+function applySubtitleScanResult(result) {
+  state.subtitleScan = result;
+  state.subtitleScanResultAt = result?.scannedAt || "";
+  state.subtitleRenderLimit = SUBTITLE_GROUP_RENDER_BATCH;
+  state.preferenceOptions = {
+    ...state.preferenceOptions,
+    ...preferenceValuesFromSubtitleScan(state.subtitleScan)
+  };
+  renderPreferenceControls();
+  initializeSubtitleSelections();
+  renderSubtitleStats(state.subtitleScan.stats);
+  renderSubtitleGroups();
+}
+
+function scanTimeLabel(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "an earlier scan"
+    : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// Load results from scheduled scans (or scans started in another tab) when
+// they are newer than what this page is showing.
+async function loadLatestScanResults() {
+  if (state.deleteInProgress) return;
+  const [media, subtitles] = await Promise.all([
+    api("/api/scan-results/media").catch(() => null),
+    api("/api/scan-results/subtitles").catch(() => null)
+  ]);
+
+  const mediaResult = media?.latest?.result;
+  const mediaBusy = ["queued", "running"].includes(state.scanJob?.status);
+  if (mediaResult?.scannedAt && mediaResult.scannedAt > state.scanResultAt && !mediaBusy) {
+    applyMediaScanResult(mediaResult);
+    const source = media.latest.source === "scheduled" ? "scheduled scan" : "scan";
+    setMessage(`Loaded ${source} results from ${scanTimeLabel(mediaResult.scannedAt)}.`, "success");
+  }
+
+  const subtitleResult = subtitles?.latest?.result;
+  const subtitleBusy = ["queued", "running"].includes(state.subtitleScanJob?.status);
+  if (
+    subtitleResult?.scannedAt &&
+    subtitleResult.scannedAt > state.subtitleScanResultAt &&
+    !subtitleBusy
+  ) {
+    applySubtitleScanResult(subtitleResult);
+    const source = subtitles.latest.source === "scheduled" ? "scheduled scan" : "scan";
+    setSubtitleMessage(
+      `Loaded ${source} results from ${scanTimeLabel(subtitleResult.scannedAt)}.`,
+      "success"
+    );
+  }
+}
+
 async function scan() {
   clearScanTimers();
   setBusy(elements.scanButton, true, "Scanning");
@@ -1456,12 +1567,7 @@ async function scan() {
   }, 1000);
 
   try {
-    state.scanJob = await api("/api/scan", {
-      method: "POST",
-      body: JSON.stringify({
-        libraryKeys: [...state.selectedLibraries]
-      })
-    });
+    state.scanJob = await startOrAttachJob("/api/scan");
     renderScanProgress(state.scanJob);
 
     while (["queued", "running"].includes(state.scanJob.status)) {
@@ -1476,15 +1582,7 @@ async function scan() {
       throw new Error(state.scanJob.error || "Scan failed.");
     }
 
-    state.scan = state.scanJob.result;
-    state.preferenceOptions = {
-      ...state.preferenceOptions,
-      ...preferenceValuesFromScan(state.scan)
-    };
-    renderPreferenceControls();
-    initializeGroupSelections();
-    renderStats(state.scan.stats);
-    renderGroups();
+    applyMediaScanResult(state.scanJob.result);
     if (state.scan.errors?.length) {
       setMessage(state.scan.errors.map((error) => `${error.library}: ${error.message}`).join(" | "), "error");
     }
@@ -1517,12 +1615,7 @@ async function subtitleScan() {
   }, 1000);
 
   try {
-    state.subtitleScanJob = await api("/api/subtitle-scan", {
-      method: "POST",
-      body: JSON.stringify({
-        libraryKeys: [...state.selectedLibraries]
-      })
-    });
+    state.subtitleScanJob = await startOrAttachJob("/api/subtitle-scan");
     renderSubtitleScanProgress(state.subtitleScanJob);
 
     while (["queued", "running"].includes(state.subtitleScanJob.status)) {
@@ -1537,16 +1630,7 @@ async function subtitleScan() {
       throw new Error(state.subtitleScanJob.error || "Subtitle scan failed.");
     }
 
-    state.subtitleScan = state.subtitleScanJob.result;
-    state.subtitleRenderLimit = SUBTITLE_GROUP_RENDER_BATCH;
-    state.preferenceOptions = {
-      ...state.preferenceOptions,
-      ...preferenceValuesFromSubtitleScan(state.subtitleScan)
-    };
-    renderPreferenceControls();
-    initializeSubtitleSelections();
-    renderSubtitleStats(state.subtitleScan.stats);
-    renderSubtitleGroups();
+    applySubtitleScanResult(state.subtitleScanJob.result);
     if (state.subtitleScan.errors?.length) {
       setSubtitleMessage(
         state.subtitleScan.errors.map((error) => `${error.library}: ${error.message}`).join(" | "),
@@ -1675,6 +1759,7 @@ function deleteTarget(target, kind, signal) {
     body: JSON.stringify({
       ratingKey: target.ratingKey,
       mediaId: target.mediaId,
+      keepMediaId: target.keepMediaId,
       confirmText: "DELETE"
     })
   });
@@ -1866,6 +1951,58 @@ function subtitleStatsFromGroups(groups, previousStats = {}) {
   };
 }
 
+function groupReclaimableBytes(group) {
+  const keeper = group.files.find((file) => file.id === group.bestFileId);
+  const keeperTarget = mediaTargetKey(keeper);
+  return group.files.reduce((sum, file) => {
+    if (keeper && mediaTargetKey(file) === keeperTarget) return sum;
+    return sum + Number(file.size || 0);
+  }, 0);
+}
+
+function removeResolvedMediaTargets(resolvedTargets) {
+  if (!state.scan || !resolvedTargets.length) return;
+
+  const resolvedKeys = new Set(resolvedTargets.map((target) => mediaTargetKey(target)).filter(Boolean));
+  const groups = [];
+
+  for (const group of state.scan.groups || []) {
+    const files = group.files.filter((file) => !resolvedKeys.has(mediaTargetKey(file)));
+    const versions = new Set(files.map((file) => mediaTargetKey(file) || file.id));
+    if (versions.size < 2) {
+      state.groupSelections.delete(group.id);
+      continue;
+    }
+
+    const selectedFileId = state.groupSelections.get(group.id);
+    if (selectedFileId && !files.some((file) => file.id === selectedFileId)) {
+      state.groupSelections.delete(group.id);
+    }
+
+    const bestStillExists = files.some((file) => file.id === group.bestFileId);
+    const bestFileId = bestStillExists ? group.bestFileId : files[0]?.id || "";
+    groups.push({
+      ...group,
+      files,
+      bestFileId,
+      suggestedFileId: files.some((file) => file.id === group.suggestedFileId)
+        ? group.suggestedFileId
+        : bestFileId
+    });
+  }
+
+  state.scan = {
+    ...state.scan,
+    groups,
+    stats: {
+      ...state.scan.stats,
+      groups: groups.length,
+      files: groups.reduce((sum, group) => sum + group.files.length, 0),
+      reclaimableBytes: groups.reduce((sum, group) => sum + groupReclaimableBytes(group), 0)
+    }
+  };
+}
+
 function removeResolvedSubtitleTargets(resolvedTargets) {
   if (!state.subtitleScan || !resolvedTargets.length) return;
 
@@ -1952,8 +2089,10 @@ async function deleteActiveFile(event) {
     if (kind === "subtitle") {
       removeResolvedSubtitleTargets([...deletedTargets, ...alreadyAbsentTargets]);
       renderSubtitleGroups();
-    } else if (deletedTargets.length) {
-      await scan();
+    } else {
+      removeResolvedMediaTargets([...deletedTargets, ...alreadyAbsentTargets]);
+      renderStats(state.scan?.stats || {});
+      renderGroups();
     }
 
     const label = deleteTargetLabel(kind);
@@ -2006,6 +2145,9 @@ function setupNavigation() {
       document.querySelectorAll(".view").forEach((view) => view.classList.remove("active-view"));
       button.classList.add("active");
       document.querySelector(`#${button.dataset.view}View`).classList.add("active-view");
+      if (["duplicates", "subtitles"].includes(button.dataset.view) && state.session) {
+        loadLatestScanResults().catch(() => {});
+      }
       elements.pageTitle.textContent = {
         duplicates: "Media Duplicates",
         subtitles: "Subtitle Cleanup",

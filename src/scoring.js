@@ -17,6 +17,7 @@ const AUDIO_CODEC_POINTS = new Map([
   ["dca-ma", 10],
   ["flac", 9],
   ["dts", 7],
+  ["dca", 7],
   ["eac3", 7],
   ["ac3", 6],
   ["aac", 5],
@@ -32,6 +33,8 @@ function normalizedToken(value) {
   const token = lower(value).trim().replace(/^\./, "");
   if (["h265", "x265"].includes(token)) return "hevc";
   if (token === "x264") return "h264";
+  // Plex reports DTS audio with ffmpeg's "dca" codec name.
+  if (token === "dca") return "dts";
   return token;
 }
 
@@ -54,6 +57,28 @@ function clamp(value, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
 }
 
+const RESOLUTION_HEIGHTS = new Map([
+  ["8k", 4320],
+  ["4k", 2160],
+  ["2160", 2160],
+  ["1440", 1440],
+  ["1080", 1080],
+  ["720", 720],
+  ["576", 576],
+  ["480", 480],
+  ["sd", 480]
+]);
+
+// Widescreen encodes are letterboxed (1920x800 is still 1080p), so judge the
+// resolution class by width as well as height and by Plex's own label.
+export function effectiveHeight(record) {
+  const height = number(record.height || record.video?.height);
+  const width = number(record.width || record.video?.width);
+  const labelHeight =
+    RESOLUTION_HEIGHTS.get(lower(record.videoResolution).replace(/p$/, "")) || 0;
+  return Math.max(height, Math.round((width * 9) / 16), labelHeight);
+}
+
 function resolutionPoints(height) {
   if (height >= 2160) return 36;
   if (height >= 1440) return 32;
@@ -74,8 +99,14 @@ function videoCodecPoints(codec) {
   return VIDEO_CODEC_POINTS.get(key) ?? 4;
 }
 
-function audioCodecPoints(codec) {
+function audioCodecPoints(codec, profile = "") {
   const key = lower(codec);
+  const audioProfile = lower(profile);
+  if (["dca", "dts"].includes(key)) {
+    // Plex exposes DTS-HD MA / DTS:X as codec "dca" with profile "ma" / "x".
+    if (/(^|[^a-z])(ma|x)([^a-z]|$)/.test(audioProfile)) return 10;
+    if (/(^|[^a-z])hra([^a-z]|$)/.test(audioProfile)) return 8;
+  }
   return AUDIO_CODEC_POINTS.get(key) ?? 3;
 }
 
@@ -145,6 +176,7 @@ function preferenceMatches(record, preferences = {}) {
 export function scoreMedia(record, preferences = {}) {
   const height = number(record.height || record.video?.height);
   const width = number(record.width || record.video?.width);
+  const resolutionHeight = effectiveHeight(record);
   const bitrate = number(record.bitrate || record.video?.bitrate);
   const videoCodec = record.videoCodec || record.video?.codec;
   const bestAudio = record.audioStreams?.[0] || {};
@@ -157,7 +189,7 @@ export function scoreMedia(record, preferences = {}) {
   const reasons = [];
   let score = 0;
 
-  const res = resolutionPoints(height);
+  const res = resolutionPoints(resolutionHeight);
   score += res;
   reasons.push(`${width || "?"}x${height || "?"}`);
 
@@ -174,7 +206,7 @@ export function scoreMedia(record, preferences = {}) {
     reasons.push("HDR");
   }
 
-  const audio = audioCodecPoints(audioCodec);
+  const audio = audioCodecPoints(audioCodec, record.audioProfile || bestAudio.profile);
   score += audio;
   if (audioCodec) reasons.push(String(audioCodec).toUpperCase());
 

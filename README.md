@@ -31,9 +31,9 @@ Bulk deletes require typing `DELETE ALL`. While deletion is running, the dialog 
 
 ## Scheduled Scans
 
-Settings includes separate schedules for Media Files and Subtitle Files. Each schedule can be off, daily, weekly, or monthly, with a server-time time-of-day value. Weekly schedules include a weekday selector, and monthly schedules include a day-of-month selector.
+Settings includes separate schedules for Media Files and Subtitle Files. Each schedule can be off, daily, weekly, or monthly, with a time-of-day value in the server's time zone. Set `TZ` on the container (for example `America/New_York`) so schedules run at the local time you expect; Settings shows the active zone. Weekly schedules include a weekday selector, and monthly schedules include a day-of-month selector.
 
-Scheduled scans reuse the same API-only scan pipeline as manual scans. Deduplarr records the last scheduled run in `/config/config.json` so a scan does not repeat every minute after its scheduled time has passed. Monthly days beyond the current month length are clamped to the last day of that month.
+Scheduled scans reuse the same API-only scan pipeline as manual scans. The newest result of each scan type is kept in memory until the container restarts and loads automatically when you open the Media Files or Subtitle Files page. Deduplarr records the last scheduled run in `/config/config.json` so a scan does not repeat every minute after its scheduled time has passed. Monthly days beyond the current month length are clamped to the last day of that month.
 
 ## Docker Compose
 
@@ -49,6 +49,9 @@ services:
     environment:
       PORT: "7889"
       CONFIG_DIR: /config
+      TZ: "Etc/UTC"
+      PUID: "1000"
+      PGID: "1000"
     volumes:
       - ./config:/config
     restart: unless-stopped
@@ -58,22 +61,24 @@ services:
 docker compose up -d
 ```
 
-Open `http://localhost:7889`, sign in with `admin/admin`, then add your Plex URL and token in Settings.
+Open `http://localhost:7889`, sign in with `admin/admin`, change the password in Settings, then add your Plex URL and token.
 
 ## Persistent Settings
 
 Settings are written atomically to `/config/config.json`. The Compose file mounts `./config` on the host to `/config` in the container, so pulling a new image or recreating the container does not reset Plex credentials, preferences, scan schedules, authentication, or delete settings.
 
-On Unraid, map its appdata directory to the same container path:
+On Unraid, map its appdata directory to the same container path and set `PUID=99` / `PGID=100`:
 
 ```yaml
 volumes:
   - /mnt/user/appdata/deduplarr:/config
 ```
 
+The container starts as root only long enough to give `/config` to `PUID:PGID`, then runs the app as that unprivileged user.
+
 ## Authentication
 
-Deduplarr starts with built-in auth enabled and the default login `admin/admin`. Change the username and password from Settings after first sign-in.
+Deduplarr starts with built-in auth enabled and the default login `admin/admin`. The app warns until you change the password in Settings. After 10 failed sign-in attempts from one address, sign-in is blocked for that address for 15 minutes. Changing the username, password, or auth mode signs out every other session.
 
 Settings also supports switching to external reverse-proxy auth. In that mode Deduplarr trusts a configured user header from your proxy. Default accepted headers are:
 
@@ -82,7 +87,9 @@ Settings also supports switching to external reverse-proxy auth. In that mode De
 - `x-authentik-username`
 - `remote-user`
 
-Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so forwarded protocol headers work correctly for cookies.
+User headers are accepted only from **trusted proxy addresses** (Settings → Authentication). The default list covers loopback and private networks (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, `fc00::/7`, `fe80::/10`). Narrow it to your proxy's address, and do not publish the Deduplarr port to untrusted clients while external auth is enabled: anyone who can reach the port from a trusted address can send the header.
+
+Run Deduplarr behind HTTPS at your reverse proxy. `X-Forwarded-For` and `X-Forwarded-Proto` are honored only from the same trusted proxy addresses.
 
 ## Environment
 
@@ -90,7 +97,9 @@ Run Deduplarr behind HTTPS at your reverse proxy. The app sets `trust proxy` so 
 | --- | --- | --- |
 | `PORT` | `7889` | HTTP port inside the container |
 | `CONFIG_DIR` | `/config` in Docker | Container directory containing persistent `config.json` |
-| `SESSION_SECRET` | generated | Optional stable session signing secret |
+| `SESSION_SECRET` | generated | Optional session signing secret. Without it, a generated secret is saved in `config.json`. |
+| `TZ` | `Etc/UTC` | Time zone used for scheduled scans |
+| `PUID` / `PGID` | `1000` / `1000` | User and group that own `/config` and run the app |
 
 ## Development
 
