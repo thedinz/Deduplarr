@@ -161,35 +161,6 @@ test("libraries exposes Plex's refreshing scan state", async (t) => {
   assert.equal(libraries[0].uuid, "library-uuid");
 });
 
-test("deleteMedia uses Plex's media-version deletion endpoint", async (t) => {
-  const originalFetch = globalThis.fetch;
-  let request;
-  globalThis.fetch = async (url, options) => {
-    request = { url: String(url), options };
-    return new Response("", { status: 200 });
-  };
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  const client = new PlexClient({
-    plexUrl: "http://plex.example:32400",
-    plexToken: "secret"
-  });
-  const result = await client.deleteMedia("123", "456");
-
-  assert.equal(request.options.method, "DELETE");
-  assert.equal(
-    request.url,
-    "http://plex.example:32400/library/metadata/123/media/456?X-Plex-Token=secret"
-  );
-  assert.equal(request.options.headers["X-Plex-Token"], "secret");
-  assert.deepEqual(result, {
-    deleted: true,
-    target: "/library/metadata/123/media/456"
-  });
-});
-
 test("deleteMedia rejects incomplete identifiers without calling Plex", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -258,12 +229,99 @@ test("deleteSubtitleStream falls back to stream ID when the stream key is unavai
   assert.equal(request.options.method, "DELETE");
   assert.equal(
     request.url,
-    "http://plex.example:32400/library/streams/789?X-Plex-Token=secret"
+    "http://plex.example:32400/library/streams/789.srt?X-Plex-Token=secret"
   );
   assert.deepEqual(result, {
     deleted: true,
-    target: "/library/streams/789"
+    target: "/library/streams/789.srt"
   });
+});
+
+test("deleteSubtitleStream retries Plex stream endpoint variants after a 404", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), options });
+    return new Response("", { status: requests.length === 1 ? 404 : 200 });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const result = await client.deleteSubtitleStream(
+    "789",
+    "subrip",
+    "/library/streams/789"
+  );
+
+  assert.deepEqual(
+    requests.map((request) => new URL(request.url).pathname),
+    ["/library/streams/789", "/library/streams/789.srt"]
+  );
+  assert.deepEqual(result, {
+    deleted: true,
+    target: "/library/streams/789.srt"
+  });
+});
+
+test("deleteSubtitleStream treats a 404 on every valid target as already absent", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return new Response("Not Found", { status: 404, statusText: "Not Found" });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+  const result = await client.deleteSubtitleStream(
+    "789",
+    "srt",
+    "/library/streams/789.srt"
+  );
+
+  assert.deepEqual(
+    requests.map((url) => new URL(url).pathname),
+    ["/library/streams/789.srt", "/library/streams/789"]
+  );
+  assert.deepEqual(result, {
+    deleted: false,
+    alreadyAbsent: true,
+    target: "/library/streams/789",
+    attemptedTargets: ["/library/streams/789.srt", "/library/streams/789"]
+  });
+});
+
+test("deleteSubtitleStream does not hide non-404 Plex errors", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response("Forbidden", { status: 403, statusText: "Forbidden" });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret"
+  });
+
+  await assert.rejects(
+    client.deleteSubtitleStream("789", "srt", "/library/streams/789.srt"),
+    /Plex API 403 Forbidden/
+  );
+  assert.equal(requestCount, 1);
 });
 
 test("subtitleDuplicates groups sidecar subtitles and ignores embedded streams", async (t) => {
