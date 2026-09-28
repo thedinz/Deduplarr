@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  DEFAULT_TRUSTED_PROXIES,
+  cleanTrustedProxies,
+  compileTrustedProxies
+} from "./network.js";
 
 const CONFIG_DIR = process.env.CONFIG_DIR || path.resolve(process.cwd(), "config");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -34,6 +39,51 @@ const DEFAULT_SCAN_SCHEDULES = {
 };
 
 const processSessionSecret = crypto.randomBytes(32).toString("hex");
+let configLock = Promise.resolve();
+let trustedProxyCheck = compileTrustedProxies(DEFAULT_TRUSTED_PROXIES);
+
+// Serialize read-modify-write cycles so a scheduled-run stamp and a settings
+// save cannot overwrite each other.
+function withConfigLock(task) {
+  const run = configLock.then(task, task);
+  configLock = run.catch(() => {});
+  return run;
+}
+
+export function isTrustedProxyAddress(address) {
+  return trustedProxyCheck(address);
+}
+
+function trustedProxies(value) {
+  // An empty list would lock out every external-auth user, so fall back to defaults.
+  const cleaned = value === undefined ? [] : cleanTrustedProxies(value);
+  return cleaned.length ? cleaned : DEFAULT_TRUSTED_PROXIES;
+}
+
+export function normalizePlexUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`.toLowerCase();
+  } catch {
+    return withProtocol.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+// A stored Plex token must never be sent to a different server than the one it
+// was saved for, so changing the URL requires re-entering the token.
+export function assertTokenForPlexUrl({ plexUrl, plexToken }, stored) {
+  const nextUrl = normalizePlexUrl(plexUrl);
+  const reusesStoredToken = plexToken === undefined || String(plexToken).trim() === "";
+  if (!nextUrl || !reusesStoredToken || !stored.plexToken) return;
+  if (nextUrl === normalizePlexUrl(stored.plexUrl)) return;
+
+  const error = new Error("Re-enter the Plex token when changing the Plex URL.");
+  error.status = 400;
+  throw error;
+}
 
 function cleanExternalHeaders(value) {
   const source = Array.isArray(value)
@@ -131,7 +181,9 @@ export function defaultAuthConfig(storedAuth = {}) {
     mode: authMode(storedAuth.mode),
     username: String(storedAuth.username || "admin"),
     passwordHash: storedAuth.passwordHash || "",
-    externalUserHeaders: cleanExternalHeaders(storedAuth.externalUserHeaders)
+    externalUserHeaders: cleanExternalHeaders(storedAuth.externalUserHeaders),
+    trustedProxies: trustedProxies(storedAuth.trustedProxies),
+    sessionVersion: Number.isInteger(storedAuth.sessionVersion) ? storedAuth.sessionVersion : 0
   };
 }
 
@@ -159,9 +211,23 @@ async function writeStoredConfig(next) {
   }
 }
 
+async function ensureSessionSecret(stored) {
+  if (process.env.SESSION_SECRET || stored.sessionSecret) return stored;
+
+  // Persist a generated secret so sessions survive restarts before the first save.
+  return withConfigLock(async () => {
+    const current = await readStoredConfig();
+    if (current.sessionSecret) return current;
+    const next = { ...current, sessionSecret: processSessionSecret };
+    await writeStoredConfig(next);
+    return next;
+  });
+}
+
 export async function getRuntimeConfig() {
-  const stored = await readStoredConfig();
+  const stored = await ensureSessionSecret(await readStoredConfig());
   const auth = defaultAuthConfig(stored.auth);
+  trustedProxyCheck = compileTrustedProxies(auth.trustedProxies);
 
   return {
     plexUrl: stored.plexUrl || "",
@@ -180,8 +246,13 @@ export async function getRuntimeConfig() {
   };
 }
 
-export async function saveConfig(input, options = {}) {
+export function saveConfig(input, options = {}) {
+  return withConfigLock(() => saveConfigUnlocked(input, options));
+}
+
+async function saveConfigUnlocked(input, options = {}) {
   const current = await readStoredConfig();
+  assertTokenForPlexUrl(input, current);
   const currentAuth = defaultAuthConfig(current.auth);
   const nextAuth = {
     ...currentAuth,
@@ -190,11 +261,24 @@ export async function saveConfig(input, options = {}) {
     externalUserHeaders:
       input.externalUserHeaders === undefined
         ? currentAuth.externalUserHeaders
-        : cleanExternalHeaders(input.externalUserHeaders)
+        : cleanExternalHeaders(input.externalUserHeaders),
+    trustedProxies:
+      input.trustedProxies === undefined
+        ? currentAuth.trustedProxies
+        : trustedProxies(input.trustedProxies)
   };
 
   if (options.passwordHash) {
     nextAuth.passwordHash = options.passwordHash;
+  }
+
+  // Invalidate existing sessions whenever the identity or credentials change.
+  if (
+    options.passwordHash ||
+    nextAuth.username !== currentAuth.username ||
+    nextAuth.mode !== currentAuth.mode
+  ) {
+    nextAuth.sessionVersion = currentAuth.sessionVersion + 1;
   }
 
   const next = {
@@ -234,10 +318,15 @@ export async function saveConfig(input, options = {}) {
   };
 
   await writeStoredConfig(next);
+  trustedProxyCheck = compileTrustedProxies(nextAuth.trustedProxies);
   return next;
 }
 
-export async function markScheduledScanRun(kind, startedAt = new Date().toISOString()) {
+export function markScheduledScanRun(kind, startedAt = new Date().toISOString()) {
+  return withConfigLock(() => markScheduledScanRunUnlocked(kind, startedAt));
+}
+
+async function markScheduledScanRunUnlocked(kind, startedAt) {
   const current = await readStoredConfig();
   const schedules = scanSchedules(current.scanSchedules || DEFAULT_SCAN_SCHEDULES);
   if (!["media", "subtitles"].includes(kind)) return scanSchedules(schedules);
@@ -264,10 +353,13 @@ export function publicConfig(config) {
     keepPreferences: config.keepPreferences,
     subtitlePreferences: config.subtitlePreferences,
     scanSchedules: config.scanSchedules,
+    serverTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     auth: {
       mode: config.auth.mode,
       username: config.auth.username,
-      externalUserHeaders: config.auth.externalUserHeaders
+      externalUserHeaders: config.auth.externalUserHeaders,
+      trustedProxies: config.auth.trustedProxies,
+      defaultPassword: !config.auth.passwordHash
     }
   };
 }
