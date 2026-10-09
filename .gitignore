@@ -5,3 +5,4 @@ config/
 npm-debug.log*
 pnpm-debug.log*
 *.log
+.claude/settings.local.json
