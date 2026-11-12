@@ -230,6 +230,58 @@ test("non-preferred language cleanup never deletes untagged subtitles", async (t
   assert.deepEqual(deleteAllLanguages, ["chi"]);
 });
 
+test("und and untagged subtitles group together as unknown", async (t) => {
+  const stream = (id, extra) => ({
+    streamType: 3,
+    id,
+    key: `/library/streams/${id}`,
+    codec: "srt",
+    ...extra
+  });
+  mockPlex(t, {
+    "GET /library/sections": {
+      MediaContainer: { Directory: [{ key: "1", title: "Movies", type: "movie" }] }
+    },
+    "GET /library/sections/1/all": {
+      MediaContainer: { size: 1, totalSize: 1, Metadata: [{ ratingKey: "10" }] }
+    },
+    "GET /library/metadata/10": {
+      MediaContainer: {
+        Metadata: [
+          {
+            ratingKey: "10",
+            title: "Movie",
+            type: "movie",
+            Media: [
+              {
+                id: "20",
+                Part: [
+                  {
+                    id: "30",
+                    file: "/m/movie.mkv",
+                    Stream: [stream(1, {}), stream(2, { languageCode: "und" })]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  });
+
+  const plex = new PlexClient({
+    plexUrl: "http://plex.example:32400",
+    plexToken: "secret",
+    subtitlePreferences: { languages: ["en"], deleteNonPreferredLanguages: true }
+  });
+  const result = await plex.subtitleDuplicates();
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].languageCode, "unknown");
+  assert.equal(result.groups[0].subtitles.length, 2);
+  assert.equal(result.groups[0].deleteAll, false);
+});
+
 test("letterboxed 1080p scores as 1080p, not 720p", () => {
   const scope = scoreMedia({ width: 1920, height: 800, videoCodec: "h264" });
   const hd = scoreMedia({ width: 1280, height: 720, videoCodec: "h264" });

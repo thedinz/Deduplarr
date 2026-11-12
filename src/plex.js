@@ -134,10 +134,13 @@ function isSidecarSubtitle(stream) {
   );
 }
 
+// Placeholder codes such as "und", "zxx" and "mul" collapse to "unknown" so
+// they group with untagged sidecars instead of forming their own group.
 function normalizeLanguageCode(stream) {
-  return text(stream?.languageCode || stream?.languageTag || stream?.language)
-    .trim()
-    .toLowerCase() || "unknown";
+  const known = [stream?.languageCode, stream?.languageTag, stream?.language]
+    .map((value) => text(value).trim().toLowerCase())
+    .find((value) => value && !isUnknownLanguage([value]));
+  return known || "unknown";
 }
 
 function subtitleLanguageLabel(stream) {
